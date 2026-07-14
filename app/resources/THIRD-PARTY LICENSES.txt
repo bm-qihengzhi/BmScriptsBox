@@ -1,0 +1,78 @@
+THIRD-PARTY LICENSES
+====================
+
+This software incorporates components from the following third-party
+open source projects:
+
+1. PySide2 (Qt for Python)
+   Version: 5.15.x
+   License: LGPL-3.0
+   Copyright: The Qt Company
+   Source: https://code.qt.io/cgit/pyside/pyside-setup.git/
+
+2. Flask
+   Version: 2.3.x
+   License: BSD-3-Clause
+   Copyright: 2010 Pallets
+   Source: https://github.com/pallets/flask
+
+3. requests
+   Version: 2.31.x
+   License: Apache-2.0
+   Copyright: 2019 Kenneth Reitz
+   Source: https://github.com/psf/requests
+
+4. peewee
+   Version: 3.16.x
+   License: MIT License
+   Copyright: 2010 Charles Leifer
+   Source: https://github.com/coleifer/peewee
+
+5. certifi
+   Version: 2023.x
+   License: MPL-2.0
+   Copyright: 2023 Kenneth Reitz
+   Source: https://github.com/certifi/python-certifi
+
+6. uv (Python Package Manager)
+   Version: 0.1.x
+   License: MIT License
+   Copyright: 2023 Astral Software Inc.
+   Source: https://github.com/astral-sh/uv
+
+OTHER COMPONENTS:
+----------------
+- click (BSD-3-Clause)
+- Jinja2 (BSD-3-Clause)
+- Werkzeug (BSD-3-Clause)
+- itsdangerous (BSD-3-Clause)
+- MarkupSafe (BSD-3-Clause)
+- GitPython (BSD-3-Clause)
+- colorama (BSD-3-Clause)
+- idna (BSD-3-Clause)
+- urllib3 (MIT License)
+- keyboard (MIT License)
+- schedule (MIT License)
+- charset-normalizer (MIT License)
+- toml (MIT License)
+- six (MIT License)
+- blinker (MIT License)
+- more-itertools (MIT License)
+- backports (MIT License)
+- jaraco (MIT License)
+- importlib_metadata (Apache-2.0)
+- importlib_resources (Apache-2.0)
+- packaging (Apache-2.0/BSD)
+- gitdb (BSD License)
+- smmap (BSD License)
+
+IMPORTANT NOTES:
+---------------
+* PySide2 is licensed under LGPL-3.0. You have the right to obtain
+  its source code, modify it, and redistribute under LGPL terms.
+* Complete license texts are in the "licenses" directory.
+* This software is provided "as is" without warranty.
+
+---
+For the full list with exact versions, see THIRD-PARTY-LICENSES.md.
+Generated on: January 2024

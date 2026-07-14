@@ -1,0 +1,12 @@
+{
+  "BM_BINARY_RESOURCE_UR": "https://gitee.com/bmscriptsbox/bm-binary-resource/raw/master/",
+  "BANNER_DATA_URL": "https://gitee.com/bmscriptsbox/bm-minor-update/raw/master/banner.json",
+  "REMOTE_VERSION_URL": "https://gitee.com/bmscriptsbox/bm-minor-update/raw/master/version.json",
+  "API_GATEWAY": "https://www.bm-box.cn",
+  "LANGUAGE": "zh_CN",
+  "PROXIES": [
+    "https://gh-proxy.org/",
+    "https://gh.llkk.cc/",
+    "https://tvv.tw/"
+  ]
+}

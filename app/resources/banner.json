@@ -1,0 +1,17 @@
+{
+  "banners": [
+    {
+      "img": "banner_1.png",
+      "link": "https://www.bm-box.cn"
+    },
+    {
+      "img": "banner_2.png",
+      "link": "https://www.bm-box.cn/help/"
+    },
+    {
+      "img": "banner_3.png",
+      "link": "https://www.github.com/bmscriptsbox/bmscriptsbox"
+    }
+  ],
+  "version": "20260622"
+}
