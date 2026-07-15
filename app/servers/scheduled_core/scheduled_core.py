@@ -23,6 +23,9 @@ class DatabaseTaskScheduler:
 
     def execute_script(self, script_id,  parameters:list):
         """执行外部脚本，路径参数使用 ParameterManager 构建 JSON"""
+        from app.data import ProjectGlobal
+        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
+            ProjectGlobal.RUNNING_SCRIPTS.add(script_id)
         try:
             if not isinstance(parameters, list):
                 parameters = [parameters] if parameters else []
@@ -36,6 +39,9 @@ class DatabaseTaskScheduler:
         except Exception as e:
             BM_LOG.error(f"执行脚本异常 {script_id}: {e}")
             return False
+        finally:
+            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
+                ProjectGlobal.RUNNING_SCRIPTS.discard(script_id)
 
     def schedule_fixed_interval_task(self, task_id, script_id, interval_minutes, parameters:list):
         """1. 固定间隔时间运行（分钟）"""

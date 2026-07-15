@@ -10,10 +10,11 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import webbrowser
 import winreg
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from app.data import ScriptDatabase
 from app.utils import BM_LOG, BmTools
@@ -22,6 +23,31 @@ from app.servers.packages import PackagesManager
 
 class ScriptRunner:
     """处理脚本执行的核心逻辑"""
+
+    # 类级进程注册表 — 跨实例追踪所有正在运行的脚本进程
+    _running_processes: Dict[str, subprocess.Popen] = {}
+    _running_lock = threading.Lock()
+
+    @classmethod
+    def track_process(cls, script_id: str, process: subprocess.Popen):
+        with cls._running_lock:
+            cls._running_processes[script_id] = process
+
+    @classmethod
+    def untrack_process(cls, script_id: str):
+        with cls._running_lock:
+            cls._running_processes.pop(script_id, None)
+
+    @classmethod
+    def terminate_all(cls):
+        """强制终止所有正在运行的脚本进程"""
+        with cls._running_lock:
+            for sid, proc in cls._running_processes.items():
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            cls._running_processes.clear()
 
     # HTML 应用模式默认窗口尺寸
     HTML_WINDOW_WIDTH = 1000
@@ -67,7 +93,7 @@ class ScriptRunner:
             script_path = Path(entry)
             if not script_path.exists():
                 raise FileNotFoundError(f"脚本不存在: {entry}")
-            return self._run_html(str(script_path))
+            return self._run_html(script_id, str(script_path))
 
         if lang not in self.configs:
             raise ValueError(f"不支持的语言: {lang}")
@@ -88,7 +114,7 @@ class ScriptRunner:
         # 5. 执行并清理
         try:
             env = self._prepare_env(lang, cmd[0])
-            return self._execute(cmd, terminal, param, env)
+            return self._execute(script_id, cmd, terminal, param, env)
         finally:
             self._cleanup(param)
 
@@ -119,7 +145,7 @@ class ScriptRunner:
         except Exception:
             pass
 
-    def _execute(self, cmd: List[str], terminal_mode: str, params: str, env: dict):
+    def _execute(self, script_id: str, cmd: List[str], terminal_mode: str, params: str, env: dict):
         """
         统一的进程调度器
         terminal_mode: 'never' | 'always' | 'auto' | 'inverse'
@@ -142,7 +168,9 @@ class ScriptRunner:
                     stdin=subprocess.DEVNULL,
                     creationflags=CREATE_NO_WINDOW,
                 )
+                ScriptRunner.track_process(script_id, process)
                 process.wait()
+                ScriptRunner.untrack_process(script_id)
                 return True, None, None
 
             # 模式 B: 始终显示新窗口 (交互模式)
@@ -153,10 +181,12 @@ class ScriptRunner:
                     creationflags=CREATE_NEW_CONSOLE,
                     encoding=encoding
                 )
+                ScriptRunner.track_process(script_id, process)
                 process.wait()
+                ScriptRunner.untrack_process(script_id)
                 return True, None, None
 
-            # 模式 C: 自动 (根据是否有参数决定是“静默捕获”还是“弹窗运行”)
+            # 模式 C: 自动 (根据是否有参数决定是'静默捕获'还是'弹窗运行')
             elif terminal_mode == 'auto':
                 if params.strip():
                     # 有参数：捕获输出并返回给 UI，不弹窗
@@ -167,13 +197,15 @@ class ScriptRunner:
                         stderr=subprocess.PIPE,
                         creationflags=CREATE_NO_WINDOW
                     )
+                    ScriptRunner.track_process(script_id, process)
                     stdout_bytes, stderr_bytes = process.communicate()
+                    ScriptRunner.untrack_process(script_id)
 
                     stdout = self._smart_decode(stdout_bytes)
                     stderr = self._smart_decode(stderr_bytes)
 
                     if process.returncode != 0:
-                        raise RuntimeError(f"执行失败: {stderr}")
+                        raise RuntimeError(f'执行失败: {stderr}')
                     return True, stdout, stderr
                 else:
                     # 无参数：直接弹窗让用户操作
@@ -182,17 +214,21 @@ class ScriptRunner:
                         env=env,
                         creationflags=CREATE_NEW_CONSOLE
                     )
+                    ScriptRunner.track_process(script_id, process)
                     process.wait()
+                    ScriptRunner.untrack_process(script_id)
                     return True, None, None
 
-            # 模式 D: 与 auto 相反 — 有参数弹窗，无参数静默
+            # 模式 D: 与 auto 相反 -- 有参数弹窗，无参数静默
             elif terminal_mode == 'inverse':
                 if params.strip():
                     process = subprocess.Popen(
                         cmd, env=env,
                         creationflags=CREATE_NEW_CONSOLE
                     )
+                    ScriptRunner.track_process(script_id, process)
                     process.wait()
+                    ScriptRunner.untrack_process(script_id)
                     return True, None, None
                 else:
                     process = subprocess.Popen(
@@ -202,15 +238,17 @@ class ScriptRunner:
                         stdin=subprocess.DEVNULL,
                         creationflags=CREATE_NO_WINDOW,
                     )
+                    ScriptRunner.track_process(script_id, process)
                     process.wait()
+                    ScriptRunner.untrack_process(script_id)
                     return True, None, None
 
             else:
-                raise ValueError(f"无效的终端模式: {terminal_mode}")
+                raise ValueError(f'无效的终端模式: {terminal_mode}')
 
         except Exception as e:
-            BM_LOG.error(f"子进程启动失败: {e}")
-            raise RuntimeError(f"进程调度失败: {e}")
+            BM_LOG.error(f'子进程启动失败: {e}')
+            raise RuntimeError(f'进程调度失败: {e}')
 
     def _smart_decode(self, data: bytes) -> str:
         """智能解码：优先 UTF-8，其次 GBK，最后忽略错误"""
@@ -223,7 +261,7 @@ class ScriptRunner:
         return data.decode('utf-8', errors='ignore')
 
     # --- HTML 浏览器应用模式执行 ---
-    def _run_html(self, html_path: str) -> Tuple[bool, None, None]:
+    def _run_html(self, script_id: str, html_path: str) -> Tuple[bool, None, None]:
         """
         在 Chrome/Edge 的 --app 模式下打开 HTML 文件
         兜底使用系统默认浏览器
@@ -242,18 +280,19 @@ class ScriptRunner:
                 f'--user-data-dir={profile_dir}',
             ]
             try:
-                subprocess.Popen(
+                process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
                 )
+                ScriptRunner.track_process(script_id, process)
                 BM_LOG.info(f"使用 {name} 应用模式打开: {file_url}")
                 return True, None, None
             except Exception as e:
                 BM_LOG.warning(f"{name} 应用模式启动失败 ({e})，尝试默认浏览器")
 
-        # 兜底：系统默认浏览器
+        # 兜底：系统默认浏览器（无法追踪进程，只能由用户手动关闭）
         webbrowser.open(file_url)
         BM_LOG.info(f"使用默认浏览器打开: {file_url}")
         return True, None, None

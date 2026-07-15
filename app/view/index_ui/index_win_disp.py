@@ -301,6 +301,8 @@ class MainView(XWidget):
         self.presenter.shutdown()
         if self.scheduled_widget:
             self.scheduled_widget.presenter.scheduled_work.stop()
+        from app.servers.scripts import ScriptRunner
+        ScriptRunner.terminate_all()
         QApplication.quit()
 
 

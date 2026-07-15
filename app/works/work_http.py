@@ -68,10 +68,16 @@ class FlaskWork(QThread):
 
     def _execute_script_in_thread(self, script_id, json_path):
         """在单独的线程中执行脚本"""
+        from app.data import ProjectGlobal
+        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
+            ProjectGlobal.RUNNING_SCRIPTS.add(script_id)
         try:
             ScriptRunner().run_script(script_id, json_path)
         except Exception as e:
             BM_LOG.error(f"启动脚本失败: {e}")
             self.signals.show_notify.emit(('error', '脚本执行失败，详细请看日志', 2000, False))
+        finally:
+            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
+                ProjectGlobal.RUNNING_SCRIPTS.discard(script_id)
 
 
