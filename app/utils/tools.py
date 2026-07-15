@@ -99,10 +99,6 @@ class BmTools:
                 language = "zh_CN" if BmTools.is_chinese_env() else "en_US"
             ProjectGlobal.LANGUAGE = language
             XI18N.set_language(language)
-            ProjectGlobal.API_GATEWAY = configs.get("API_GATEWAY", "")
-            ProjectGlobal.BANNER_DATA_URL = configs.get("BANNER_DATA_URL", "")
-            ProjectGlobal.BM_BINARY_RESOURCE_UR = configs.get("BM_BINARY_RESOURCE_UR", "")
-            ProjectGlobal.REMOTE_VERSION_URL = configs.get("REMOTE_VERSION_URL", "")
             ProjectGlobal.PROXIES = configs.get("PROXIES", ProjectGlobal.PROXIES)
 
     @staticmethod

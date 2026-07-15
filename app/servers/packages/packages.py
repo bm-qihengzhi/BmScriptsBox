@@ -251,13 +251,4 @@ class PackagesManager(QObject):
 
 
 
-if __name__ == '__main__':
-    # # 添加sys.path
-    # sys.path.insert(0, str(Path(__file__).parents[3]))
-    # # 示例使用
-    # packages_manager = PackagesManager()
-    # packages_manager.packages_progress.connect(lambda x: print(x))
-    # print(packages_manager.install_cli('pnpm'))
-    root_toml = BmTools.get_root_path() / 'pyproject.toml'
-    print(root_toml)
 

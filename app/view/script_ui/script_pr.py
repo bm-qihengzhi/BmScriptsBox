@@ -7,8 +7,6 @@ import json
 import webbrowser
 
 from PySide2.QtCore import Signal, QObject
-
-from app.data import ScriptEntity
 from app.utils import BmNotify, BmTools, BM_LOG
 
 

@@ -33,10 +33,6 @@ class ConfigWork(QThread):
             except json.JSONDecodeError as e:
                 self.config_error.emit(f"配置文件解析失败: {e}")
                 return
-            ProjectGlobal.API_GATEWAY = configs.get("API_GATEWAY", "")
-            ProjectGlobal.BANNER_DATA_URL = configs.get("BANNER_DATA_URL", "")
-            ProjectGlobal.BM_BINARY_RESOURCE_UR = configs.get("BM_BINARY_RESOURCE_UR", "")
-            ProjectGlobal.REMOTE_VERSION_URL = configs.get("REMOTE_VERSION_URL", "")
             ProjectGlobal.PROXIES = configs.get("PROXIES", ProjectGlobal.PROXIES)
             ProjectGlobal.LANGUAGE = configs.get("LANGUAGE", "zh_CN")
         self.config_loaded.emit()

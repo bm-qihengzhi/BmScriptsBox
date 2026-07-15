@@ -24,7 +24,7 @@ class AboutWidget(QWidget):
     def _init_signal(self):
         self.website_btn.clicked.connect(lambda: webbrowser.open(f'{ProjectGlobal.API_GATEWAY}'))
         self.help_btn.clicked.connect(lambda: webbrowser.open(f'{ProjectGlobal.API_GATEWAY}/help'))
-        self.github_btn.clicked.connect(lambda: webbrowser.open('https://www.github.com/bmscriptsbox/bmscriptsbox'))
+        self.github_btn.clicked.connect(lambda: webbrowser.open('https://www.github.com/bm-qihengzhi/bmscriptsbox'))
         self.licenses_btn.clicked.connect(self.open_licenses_file)
 
     def open_licenses_file(self):

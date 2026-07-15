@@ -56,6 +56,7 @@ class ContextWidget(QWidget):
             menu_items=[
                 {"text": tr("注册菜单"), "value": "register"},
                 {"text": tr("卸载菜单"), "value": "uninstall"},
+                {"text": tr("菜单切换"), "value": "Switch"},
             ],
         )
         self.more_btn.menuTriggered.connect(self.presenter.on_menu_action_triggered)

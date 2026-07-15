@@ -90,7 +90,8 @@ class MenuPresenter(QObject):
 
         actions = {
             'register': ('RegisterContext.bat', "注册右键"),
-            'uninstall': ('UninstallContext.bat', "卸载右键")
+            'uninstall': ('UninstallContext.bat', "卸载右键"),
+            'Switch': ('W11MenuStyleSwitch.bat', "菜单切换"),
         }
 
         if action_data not in actions:

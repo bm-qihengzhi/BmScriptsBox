@@ -30,6 +30,7 @@ class RemoteManifestProvider:
         self.cache_ttl = cache_ttl
         self._session = requests.Session()
         self._session.trust_env = False
+        self._is_china = self._check_if_china()
 
     def _get_random_headers(self) -> Dict[str, str]:
         """生成随机的请求头"""
@@ -38,6 +39,17 @@ class RemoteManifestProvider:
             "Accept": "application/json",
             "Cache-Control": "no-cache",  # 告诉服务器/CDN 我们想要最新的数据
         }
+
+    def _check_if_china(self) -> bool:
+        try:
+            response = self._session.get(
+                "http://ip-api.com/json/?fields=countryCode",
+                timeout=2)
+            if response.status_code == 200:
+                return response.json().get("countryCode") == "CN"
+        except Exception:
+            pass
+        return True
 
     def clear_cache(self):
         """手动清空所有缓存"""
@@ -63,26 +75,39 @@ class RemoteManifestProvider:
         base_url = ProjectGlobal.BM_BINARY_RESOURCE_UR.rstrip('/')
         url = f"{base_url}/{cache_key}.json"
 
-        try:
-            response = self._session.get(
-                url,
-                headers=self._get_random_headers(),
-                timeout=(5, 20))
-            response.raise_for_status()
-            data = response.json()
+        # 构建请求队列：中国区 + GitHub 域名时优先走代理
+        urls_to_try = []
+        is_github = "github" in url.lower()
+        if is_github and self._is_china:
+            for proxy in ProjectGlobal.PROXIES:
+                urls_to_try.append(f"{proxy.rstrip('/')}/{url}")
+        urls_to_try.append(url)
 
-            # 3. 更新缓存及时间戳
-            self._cache[cache_key] = {
-                'content': data,
-                'timestamp': now,
+        last_exception = None
+        for try_url in urls_to_try:
+            try:
+                response = self._session.get(
+                    try_url,
+                    headers=self._get_random_headers(),
+                    timeout=(5, 20))
+                response.raise_for_status()
+                data = response.json()
 
-            }
-            return data
+                # 3. 更新缓存及时间戳
+                self._cache[cache_key] = {
+                    'content': data,
+                    'timestamp': now,
 
-        except Exception as e:
-            if cache_key in self._cache:
-                return self._cache[cache_key]['content']
-            raise RuntimeError(f"无法获取远程清单: {e}")
+                }
+                return data
+
+            except Exception as e:
+                last_exception = e
+                continue
+
+        if cache_key in self._cache:
+            return self._cache[cache_key]['content']
+        raise RuntimeError(f"无法获取远程清单: {last_exception}")
 
 
     def get_banner_manifest(self) -> Dict:

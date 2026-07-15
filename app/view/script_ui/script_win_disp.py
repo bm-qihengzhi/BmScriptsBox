@@ -3,12 +3,12 @@ Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
 SPDX-License-Identifier: AGPL-3.0
 """
-from PySide2.QtCore import Qt, Signal, QTimer, QPoint
+from PySide2.QtCore import Qt, Signal, QTimer
 from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, \
-    QStackedLayout, QApplication
+    QStackedLayout
 
 from xsideui import XPushButton, XFlowLayout, XLineEdit, XCarousel, XLabel, XImage, IconName, XIcon, XColor, \
-    XScrollArea, tr, XIconBadge, XTextBadge
+    XScrollArea, tr
 
 from .script_win_card import ScriptCard
 from .script_pr import ScriptPresenter
@@ -129,21 +129,6 @@ class ScriptsWidget(QWidget):
             script_card.started.connect(self._on_card_started)
             script_card.clicked.connect(script_card._start_script)
             self.flow_layout.addWidget(script_card)
-            if script.pin:
-                XIconBadge(script_card,
-                           IconName.PIN_FILL,
-                           color=XColor.TERTIARY,
-                           size=14,
-                           offset=QPoint(10, 10),
-                           anchor=XTextBadge.Anchor.TOP_LEFT,
-                           tag='pin')
-            if script.badge:
-                XTextBadge(script_card,
-                           script.badge,
-                           color=XColor.TERTIARY,
-                           offset=QPoint(-16, 10),
-                           anchor=XTextBadge.Anchor.TOP_RIGHT,
-                           tag='badge')
 
 
 
@@ -159,14 +144,3 @@ class ScriptsWidget(QWidget):
         self.presenter.refresh_scripts()
 
 
-if __name__ == '__main__':
-    import sys
-    from pathlib import Path
-    from app.utils import BmTools
-
-    sys.path.insert(0, str(BmTools.get_root_path()))
-    app = QApplication(sys.argv)
-    # theme_manager.set_theme('light')
-    window = ScriptsWidget()
-    window.show()
-    app.exec_()

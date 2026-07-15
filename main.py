@@ -4,17 +4,20 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: AGPL-3.0
 """
 import sys
+import ctypes
 from pathlib import Path
+
+
 
 if not getattr(sys, 'frozen', False):
     sys.path.insert(0, str(Path(__file__).parent.absolute()))
 
-# 加载纯 Python 包 zip（减少 Defender 扫描文件数）
+# 加载纯 Python 包 zip（嵌入式打包需要、不用可注释）
 _pure_zip = Path(__file__).parent / 'runtime' / 'Lib' / 'site-packages' / '_pure_packages.zip'
 if _pure_zip.exists():
     sys.path.insert(0, str(_pure_zip))
 
-from PySide2.QtCore import Qt
+from PySide2.QtCore import Qt, QTimer
 from PySide2.QtWidgets import QApplication
 from PySide2.QtNetwork import QLocalServer
 from app.view.index_ui.index_win_disp import MainView
@@ -37,6 +40,14 @@ def handle_new_connection(server):
         main_window.activateWindow()
 
 
+def watch_console():
+    """检测后续代码意外创建的控制台并分离"""
+    if sys.platform == 'win32':
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.kernel32.FreeConsole()
+
+
 def main():
     app_id = "BmScriptsBox_Unique_ID"
 
@@ -56,12 +67,12 @@ def main():
         server.listen(app_id)
     server.newConnection.connect(lambda: handle_new_connection(server))
 
-    # 4. 语言/图标设置
+    # 5. 语言/图标设置
     BmTools.set_win32_logo()
     BmTools.set_language()
     app.setQuitOnLastWindowClosed(False)
 
-    # 5. 启动窗口
+    # 6. 启动窗口
     global main_window
     main_window = MainView()
     main_window.show()

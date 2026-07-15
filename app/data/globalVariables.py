@@ -24,21 +24,20 @@ class ProjectGlobal:
     CONFIG = None
     LOGIN_CODE = None
     Task = None
-    BM_BINARY_RESOURCE_UR = "https://gitee.com/bmscriptsbox/bm-binary-resource/raw/master/"
-    BANNER_DATA_URL = 'https://gitee.com/bmscriptsbox/bm-minor-update/raw/master/banner.json'
-    REMOTE_VERSION_URL = 'https://gitee.com/bmscriptsbox/bm-minor-update/raw/master/version.json'
-    API_GATEWAY = ''
+    BM_BINARY_RESOURCE_UR = "https://raw.githubusercontent.com/bm-qihengzhi/BmBinaryResource/refs/heads/main/"
+    BANNER_DATA_URL = 'https://raw.githubusercontent.com/bm-qihengzhi/BmMinorUpdate/refs/heads/main/banner.json'
+    REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/bm-qihengzhi/BmMinorUpdate/refs/heads/main/version.json'
+    API_GATEWAY = 'https://www.bm-box.cn'
     SOFT_VERSION = None
     LANGUAGE = None
     RUNNING_SCRIPTS_LOCK = threading.Lock()
     RUNNING_SCRIPTS = set()
     PROXIES = [
     "https://gh-proxy.org/",
-    "https://git.yylx.win",
-    "https://gh.llkk.cc/",
-    "https://gh.xxooo.cf/",
-    "https://gh-proxy.ygxz.in/",
-    "https://gh-proxy.net/"
+    "https://github.1zyq1.com/",
+    "https://v4.gh-proxy.org/",
+    "https://v6.gh-proxy.org/",
+    "https://cdn.gh-proxy.org/"
   ]
 
 

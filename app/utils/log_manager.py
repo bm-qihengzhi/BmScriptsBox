@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 class AsyncLoggerManager:
-    def __init__(self, log_level=logging.DEBUG):
+    def __init__(self, log_level=logging.INFO):
         if getattr(sys, 'frozen', False):
             _root = Path(sys.executable).parent
         else:

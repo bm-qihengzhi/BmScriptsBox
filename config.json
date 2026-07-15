@@ -1,0 +1,11 @@
+{
+  "platforms": [
+    "tskr",
+    "jinritoutiao"
+  ],
+  "platform_names": [
+    "36氪",
+    "今日头条"
+  ],
+  "output_dir": ""
+}

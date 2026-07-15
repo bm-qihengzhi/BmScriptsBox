@@ -7,12 +7,11 @@ import webbrowser
 
 from PySide2.QtCore import Qt, Signal, QUrl, QSize
 from PySide2.QtGui import QDesktopServices
-from PySide2.QtWidgets import QVBoxLayout, QFrame
+from PySide2.QtWidgets import QVBoxLayout, QFrame, QLabel
 
 from app.data import ScriptDatabase, ProjectGlobal
 from app.utils import BM_LOG, BmNotify
 from app.utils.tools import BmTools
-from app.view.script_ui.script_card_pr import ScriptCardPresenter
 from xsideui import XCard, XLabel, XImage, XMenu, \
     IconName, XIcon, XColor, tr
 
@@ -21,17 +20,25 @@ class ScriptCard(XCard):
     """
     脚本卡片
     """
+
+    # 文本徽章颜色映射（badge 文本 → 背景色）
+    BADGE_COLORS = {
+        '本地': '#909399',
+    }
+
     uninstalled = Signal(str)
     started = Signal(str)
     updated = Signal(dict)
 
     def __init__(self, script_info):
         super().__init__()
-        self.presenter = ScriptCardPresenter()
         self.sizeHint()
         self.set_clickable(True)
         self.script_info = script_info
+        self._pin_label = None
+        self._badge_label = None
         self._setup_ui()
+        self._setup_badges()
 
     def sizeHint(self):
         # 根据父容器宽度计算卡片宽度
@@ -80,6 +87,45 @@ class ScriptCard(XCard):
         self.title_label.setContextMenuPolicy(Qt.NoContextMenu)  # 禁用右键菜单
         self.title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)  # 禁用鼠标事件
 
+
+    def _setup_badges(self):
+        """创建徽章子控件（随卡片裁剪，无浮动问题）"""
+        # 置顶图标
+        if self.script_info.pin:
+            pixmap = XIcon.get(name=IconName.PIN_FILL, color=XColor.TERTIARY, size=14).pixmap()
+            self._pin_label = QLabel(self)
+            self._pin_label.setPixmap(pixmap)
+            self._pin_label.setFixedSize(14, 14)
+            self._pin_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        else:
+            self._pin_label = None
+
+        # 文本徽章
+        badge_text = self.script_info.badge
+        if badge_text:
+            badge_color = ScriptCard.BADGE_COLORS.get(badge_text, '#909399')
+            self._badge_label = QLabel(badge_text, self)
+            self._badge_label.setStyleSheet(
+                f"QLabel {{"
+                f"  background-color: {badge_color};"
+                f"  color: #F1F1F1;"
+                f"  padding: 1px 6px;"
+                f"  border-radius: 4px;"
+                f"  font-size: 11px;"
+                f"}}"
+            )
+            self._badge_label.adjustSize()
+            self._badge_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        else:
+            self._badge_label = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._pin_label:
+            self._pin_label.move(10, 10)
+        if self._badge_label:
+            bw = self._badge_label.width()
+            self._badge_label.move(self.width() - bw - 0, 0)
 
     def _add_menu(self, pos):
         """
