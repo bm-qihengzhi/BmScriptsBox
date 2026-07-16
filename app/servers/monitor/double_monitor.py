@@ -45,7 +45,7 @@ class RouseMonitor(QObject):
 
     def _on_key_event(self, event):
         """底层按键回调"""
-        if event.name.lower() in self.target_keys:
+        if event.name and event.name.lower() in self.target_keys:
             if event.event_type == self._kb.KEY_UP:
                 self._process_click()
 

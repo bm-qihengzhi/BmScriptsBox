@@ -1,6 +1,6 @@
 [project]
 name = "bmscriptsbox"
-version = "1.0.2"
+version = "1.0.3"
 description = "BmScriptsBox - Windows跨语言脚本调度与管理软件"
 readme = "README.md"
 requires-python = ">=3.8"

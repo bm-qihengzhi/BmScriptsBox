@@ -12,9 +12,8 @@ import sys
 import tempfile
 import threading
 import webbrowser
-import winreg
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from app.data import ScriptDatabase
 from app.utils import BM_LOG, BmTools
@@ -53,12 +52,6 @@ class ScriptRunner:
     HTML_WINDOW_WIDTH = 1000
     HTML_WINDOW_HEIGHT = 800
 
-    # 浏览器检测优先级与注册表路径
-    BROWSER_REG_PATHS = {
-        'chrome': r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe',
-        'edge': r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',
-    }
-
     def __init__(self):
         self.db = None
         # 语言配置映射：(执行程序名/获取函数, 是否需要额外环境变量)
@@ -68,6 +61,7 @@ class ScriptRunner:
             'python': {'ext': '.py', 'cmd_gen': self._get_python_cmd},
             'node.js': {'ext': '.js', 'cmd_gen': self._get_node_cmd},
             'autohotkey': {'ext': '.ahk', 'cmd_gen': self._get_ahk_cmd},
+            'html': {'ext': '.html', 'cmd_gen': self._get_html_cmd},
             'exe': {'ext': '.exe', 'cmd_gen': lambda p, v: [p]},
         }
     def get_script_info(self, script_id: str) -> tuple:
@@ -87,13 +81,6 @@ class ScriptRunner:
         # 1. 获取基础信息
         entry, lang, version, terminal = self.get_script_info(script_id)
         lang = lang.lower()
-
-        # HTML 走独立的浏览器 app 模式执行流程
-        if lang == 'html':
-            script_path = Path(entry)
-            if not script_path.exists():
-                raise FileNotFoundError(f"脚本不存在: {entry}")
-            return self._run_html(script_id, str(script_path))
 
         if lang not in self.configs:
             raise ValueError(f"不支持的语言: {lang}")
@@ -260,89 +247,14 @@ class ScriptRunner:
                 continue
         return data.decode('utf-8', errors='ignore')
 
-    # --- HTML 浏览器应用模式执行 ---
-    def _run_html(self, script_id: str, html_path: str) -> Tuple[bool, None, None]:
-        """
-        在 Chrome/Edge 的 --app 模式下打开 HTML 文件
-        兜底使用系统默认浏览器
-        """
-        file_url = f'file://{Path(html_path).resolve().as_posix()}'
-        cache_root = BmTools.get_root_path() / 'BmPackages' / 'BmCache' / 'html_app'
 
-        browser = self._find_browser()
-        if browser:
-            name, exe_path = browser
-            profile_dir = self._get_browser_cache_dir(cache_root, name, self.HTML_WINDOW_WIDTH, self.HTML_WINDOW_HEIGHT)
-            cmd = [
-                exe_path,
-                f'--app={file_url}',
-                f'--window-size={self.HTML_WINDOW_WIDTH},{self.HTML_WINDOW_HEIGHT}',
-                f'--user-data-dir={profile_dir}',
-            ]
-            try:
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-                )
-                ScriptRunner.track_process(script_id, process)
-                BM_LOG.info(f"使用 {name} 应用模式打开: {file_url}")
-                return True, None, None
-            except Exception as e:
-                BM_LOG.warning(f"{name} 应用模式启动失败 ({e})，尝试默认浏览器")
-
-        # 兜底：系统默认浏览器（无法追踪进程，只能由用户手动关闭）
-        webbrowser.open(file_url)
-        BM_LOG.info(f"使用默认浏览器打开: {file_url}")
-        return True, None, None
-
-    @staticmethod
-    def _find_browser() -> Optional[Tuple[str, str]]:
-        """
-        从注册表查找可用的浏览器，按 Chrome → Edge 优先级
-        返回 (name, exe_path) 或 None
-        """
-        for name, subkey in ScriptRunner.BROWSER_REG_PATHS.items():
-            # 优先 HKLM（系统级安装）
-            for root in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
-                try:
-                    key = winreg.OpenKey(root, subkey)
-                    exe_path, _ = winreg.QueryValueEx(key, "")
-                    winreg.CloseKey(key)
-                    if exe_path and os.path.exists(exe_path):
-                        return name, exe_path
-                except (FileNotFoundError, OSError):
-                    continue
-        return None
-
-    @staticmethod
-    def _get_browser_cache_dir(cache_root: Path, browser_name: str, width: int, height: int) -> str:
-        """获取/创建浏览器固定缓存目录，并写入窗口尺寸到配置文件"""
-        profile_dir = cache_root / browser_name
-        profile_dir.mkdir(parents=True, exist_ok=True)
-
-        # 写入窗口尺寸到 Preferences，覆盖 Chrome/Edge 保存的旧几何信息
-        prefs_dir = profile_dir / 'Default'
-        prefs_dir.mkdir(parents=True, exist_ok=True)
-        prefs_file = prefs_dir / 'Preferences'
-        try:
-            prefs = json.loads(prefs_file.read_text('utf-8')) if prefs_file.exists() else {}
-            prefs.setdefault('browser', {})['window_placement'] = {
-                'left': 0, 'top': 0,
-                'right': width, 'bottom': height,
-                'maximized': False,
-            }
-            prefs.setdefault('profile', {})['exited_cleanly'] = True
-            prefs_file.write_text(json.dumps(prefs, indent=2), 'utf-8')
-        except Exception:
-            pass
-
-        return str(profile_dir)
 
     # --- 具体的命令构造逻辑 ---
+    def _get_html_cmd(self, path:str, version: str) -> List[str]:
+        webview_path = Path(__file__).parent / 'webview-cli.exe'
+        return [str(webview_path), path,'--width', str(self.HTML_WINDOW_WIDTH),'--height', str(self.HTML_WINDOW_HEIGHT)]
+
     def _get_python_cmd(self, path: str, version: str) -> List[str]:
-        # 这里的 venv 检测逻辑可以抽象出来
         venv_python = Path(path).parent / '.venv' / 'Scripts' / 'python.exe'
         exe = venv_python if venv_python.exists() else PackagesManager().install_cli('python', version)
         return [str(exe), path]

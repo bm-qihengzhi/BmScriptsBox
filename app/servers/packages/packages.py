@@ -91,7 +91,7 @@ class PackagesManager(QObject):
 
             # 7. 环境变量与持久化
             if payload.get('env_set'):
-                self._create_shim_exe(bin_path)
+                self._create_shim_exe(bin_path, package_name)
                 self._emit_status("环境变量 Shim 重定向已创建")
 
             self._update_manifest(package_name, str(bin_path), cloud_res.version)
@@ -200,16 +200,16 @@ class PackagesManager(QObject):
             raise RuntimeError(f"静默安装失败: {name}")
         return Path(final_path)
 
-    def _create_shim_exe(self, source_path: Path):
+    def _create_shim_exe(self, source_path: Path, package_name: str):
         """创建 Windows Shim (原生 exe 重定向)"""
         bin_dir = self.base_path / 'bin'
         bin_dir.mkdir(exist_ok=True)
 
         launcher = Path(__file__).parent / 'shim-launcher.exe'
-        shim_path = bin_dir / f"{source_path.stem}.exe"
+        shim_path = bin_dir / f"{package_name}.exe"
         shutil.copy(launcher, shim_path)
 
-        target_path = bin_dir / f"{source_path.stem}.target"
+        target_path = bin_dir / f"{package_name}.target"
         target_path.write_text(str(source_path.resolve()), encoding='utf-8')
 
     def _create_uv_config(self, toml_path: Path):
