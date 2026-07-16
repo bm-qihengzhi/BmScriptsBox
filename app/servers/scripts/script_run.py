@@ -251,8 +251,7 @@ class ScriptRunner:
 
     # --- 具体的命令构造逻辑 ---
     def _get_html_cmd(self, path:str, version: str) -> List[str]:
-        webview_path = Path(__file__).parent / 'webview-cli.exe'
-        return [str(webview_path), path,'--width', str(self.HTML_WINDOW_WIDTH),'--height', str(self.HTML_WINDOW_HEIGHT)]
+        return ["webview-cli", path,'--width', str(self.HTML_WINDOW_WIDTH),'--height', str(self.HTML_WINDOW_HEIGHT)]
 
     def _get_python_cmd(self, path: str, version: str) -> List[str]:
         venv_python = Path(path).parent / '.venv' / 'Scripts' / 'python.exe'

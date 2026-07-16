@@ -413,6 +413,12 @@ class InstallScript(QObject):
             self.ahk_deploy.ahk_runtime_progress.connect(self.progress_signal.emit)
             self.ahk_deploy.prepare_env(spec_str=config.runtime.language_version)
 
+        if lang == "html":
+            self._emit_progress("同步webview...")
+            p = PackagesManager()
+            p.packages_progress.connect(self.progress_signal.emit)
+            p.install_cli('webview-cli')
+
         # 处理二进制资源下载
         if config.runtime.binaries:
             self._emit_progress("同步外部二进制资源...")
