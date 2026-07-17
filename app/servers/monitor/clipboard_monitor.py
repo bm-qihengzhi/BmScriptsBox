@@ -67,7 +67,7 @@ class ClipboardMonitor(QObject):
             self._kb.unhook(self.hook_id)
             self.hook_id = None
             self.state = ShortcutState.IDLE
-            print("剪切板双击检测服务已停止")
+            BM_LOG.info("剪切板双击检测服务已停止")
 
     def handle_key_event(self, event):
         """键盘事件回调（状态机核心逻辑）"""

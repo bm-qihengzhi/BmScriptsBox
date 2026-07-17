@@ -45,8 +45,6 @@ class DatabaseTaskScheduler:
 
     def schedule_fixed_interval_task(self, task_id, script_id, interval_minutes, parameters:list):
         """1. 固定间隔时间运行（分钟）"""
-
-        print(parameters)
         def fixed_interval_wrapper():
             try:
                 self.thread_pool.submit(self.execute_script, script_id, parameters)

@@ -8,6 +8,7 @@ from PySide2.QtCore import QTimer
 from app.data import ProjectGlobal
 from app.data.database import TaskDatabase
 from app.works.work_scheduled import ScheduledWork
+from app.utils import BM_LOG
 
 
 class ScheduledPresenter:
@@ -64,4 +65,4 @@ class ScheduledPresenter:
             self.scheduled_work.remove_task(db_id)
             self.get_tasks()
         except Exception as e:
-            print(e)
+            BM_LOG.error(f"删除定时任务失败：{e}")

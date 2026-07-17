@@ -57,7 +57,7 @@ class ScriptRunner:
         # 语言配置映射：(执行程序名/获取函数, 是否需要额外环境变量)
         self.configs = {
             'bat': {'ext': '.bat', 'cmd_gen': lambda p, v: [p]},
-            'powershell': {'ext': '.ps1', 'cmd_gen': lambda p, v: ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', p]},
+            'powershell': {'ext': '.ps1', 'cmd_gen': lambda p, v: ['pwsh', '-ExecutionPolicy', 'Bypass', '-File', p]},
             'python': {'ext': '.py', 'cmd_gen': self._get_python_cmd},
             'node.js': {'ext': '.js', 'cmd_gen': self._get_node_cmd},
             'autohotkey': {'ext': '.ahk', 'cmd_gen': self._get_ahk_cmd},
@@ -95,7 +95,7 @@ class ScriptRunner:
         cmd = config['cmd_gen'](str(script_path), version)
 
         # 4. 参数处理 (支持 JSON 路径或普通字符串)
-        if param.strip():
+        if param.strip() and lang != 'html':
             cmd.extend(shlex.split(param, posix=False))
 
         # 5. 执行并清理
@@ -143,7 +143,6 @@ class ScriptRunner:
         # 1. 核心标志位定义
         CREATE_NO_WINDOW = 0x08000000 if is_windows else 0
         CREATE_NEW_CONSOLE = 0x00000010 if is_windows else 0
-
         try:
             # 模式 A: 绝不显示窗口 (静默执行)
             if terminal_mode == 'never':
@@ -154,6 +153,7 @@ class ScriptRunner:
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
                     creationflags=CREATE_NO_WINDOW,
+
                 )
                 ScriptRunner.track_process(script_id, process)
                 process.wait()

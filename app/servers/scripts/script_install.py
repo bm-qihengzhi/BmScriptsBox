@@ -414,10 +414,23 @@ class InstallScript(QObject):
             self.ahk_deploy.prepare_env(spec_str=config.runtime.language_version)
 
         if lang == "html":
+            # 安装webview-cli
             self._emit_progress("同步webview...")
             p = PackagesManager()
             p.packages_progress.connect(self.progress_signal.emit)
             p.install_cli('webview-cli')
+
+        if lang == "bat":
+            # 转换CRLF
+            self._emit_progress("统一换行符为 CRLF 格式...")
+            self._convert_bat_to_crlf(script_dir)
+
+        if lang == "powershell":
+            # 安装powershell v7
+            self._emit_progress("同步pwsh...")
+            p = PackagesManager()
+            p.packages_progress.connect(self.progress_signal.emit)
+            p.install_cli('pwsh')
 
         # 处理二进制资源下载
         if config.runtime.binaries:
@@ -454,8 +467,6 @@ class InstallScript(QObject):
 
     def _format_friendly_error(self, error: Exception) -> str:
         err_str = str(error).strip()
-
-        # 拦截已知网络问题
         if "ProxyError" in err_str: return "网络代理异常..."
         if "timeout" in err_str.lower(): return "请求超时..."
 
@@ -465,6 +476,37 @@ class InstallScript(QObject):
 
         return f"安装由于意外中断: {first_line}"
 
+    def _convert_bat_to_crlf(self, directory: Path):
+        """
+        将指定目录下所有 .bat 和 .cmd 文件转换为 CRLF 换行符
+
+        Args:
+            directory: 要处理的目录路径 (Path 对象)
+        """
+        # 遍历所有 .bat 和 .cmd 文件
+        for ext in ('.bat', '.cmd'):
+            for script_file in directory.rglob(f'*{ext}'):
+                # 跳过 .git 目录下的文件
+                if '.git' in script_file.parts:
+                    continue
+
+                try:
+                    content = script_file.read_bytes()
+
+                    # 检查是否已经是 CRLF
+                    if b'\r\n' in content:
+                        temp = content.replace(b'\r\n', b'')
+                        if b'\n' not in temp:
+                            continue
+
+                    # 转换为 CRLF
+                    content = content.replace(b'\r\n', b'\n')
+                    content = content.replace(b'\n', b'\r\n')
+
+                    script_file.write_bytes(content)
+
+                except Exception as e:
+                    BM_LOG.error('CRLF转换失败')
 
 
 

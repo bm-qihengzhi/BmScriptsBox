@@ -21,10 +21,11 @@ class UpdateWidget(XDialog):
     """软件更新小部件"""
     completed_single = Signal(str)
 
-    def __init__(self, version: str, diff: list, parent=None):
+    def __init__(self, version: str, diff: list, remote_details: dict = None, parent=None):
         super().__init__(parent=parent)
         self.version = version
         self.diff = diff
+        self.remote_details = remote_details
         self._setup_ui()
         self._preload_widgets()
 
@@ -129,7 +130,7 @@ class UpdateWidget(XDialog):
 
     def _start_download(self):
         """执行下载"""
-        self.update_task = UpdateDownLoadTask(self.diff)
+        self.update_task = UpdateDownLoadTask(self.diff, self.remote_details)
         self.update_task.progressed.connect(self.update_details)
         self.update_task.completed.connect(self.download_complete)
         self.update_task.start()

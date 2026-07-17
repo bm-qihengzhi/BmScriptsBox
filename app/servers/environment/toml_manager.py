@@ -4,15 +4,10 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: AGPL-3.0
 """
 import json
-from pprint import pprint
-from typing import Optional
-
 import toml
-import uuid
 import zipfile
 from pathlib import Path
 
-from app.data import ScriptDatabase
 from app.data.toml_schemas import ScriptTomlConfig, ScriptLoadResult
 from pydantic import ValidationError
 
@@ -189,19 +184,3 @@ class TomlManager:
             return ScriptLoadResult(success=False, error_messages=semantic_errors)
 
 
-if __name__ == "__main__":
-    manager = TomlManager()
-    # 拿到结果对象，而不是让它崩溃
-    result = manager.read_toml_from_dir(r"D:\ScriptsHub\python\files_classification")
-    # result = manager.read_pyproject_toml_from_dir(r"D:\ScriptsHub\python\微信双开")
-    # print(result)
-    # ScriptDatabase().from_config_model(result.config)
-    # result = manager.read_toml_from_zip(r"D:\ScriptsHub\bat\系统记事本\系统记事本.zip")
-
-    if result.success:
-        print(f"✅ 成功！脚本名称: {result.config.runtime.language_version}")
-    else:
-        print("❌ 导入失败，错误清单如下：")
-        print(result.error_messages)
-        for msg in result.error_messages:
-            print(f"  - {msg}")

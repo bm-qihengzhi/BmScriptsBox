@@ -118,7 +118,3 @@ BM_LOG = async_logger_manager.get_logger()
 
 
 
-if __name__ == '__main__':
-    from app.utils import BmTools
-    print(BmTools.get_root_path() / "BmLogs" / 'BmLogs.log')
-

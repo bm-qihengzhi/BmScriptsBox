@@ -117,26 +117,23 @@ class RemoteManifestProvider:
         cache_key = 'banner'
         now = time.time()
 
-        # 1. 检查缓存是否有效
+        # 检查缓存是否有效
         if cache_key in self._cache:
             entry = self._cache[cache_key]
             if now - entry['timestamp'] < self.cache_ttl:
                 return entry['content']
 
-        url = ProjectGlobal.BANNER_DATA_URL
         try:
             response = self._session.get(
-                url,
+                ProjectGlobal.BANNER_DATA_URL,
                 headers=self._get_random_headers(),
                 timeout=(5, 20))
             response.raise_for_status()
             data = response.json()
-
-            # 3. 更新缓存及时间戳
+            # 更新缓存及时间戳
             self._cache[cache_key] = {
                 'content': data,
                 'timestamp': now,
-
             }
             return data
 
@@ -147,9 +144,3 @@ class RemoteManifestProvider:
 
 
 
-
-
-if __name__ == '__main__':
-    remote = RemoteManifestProvider()
-    print(remote.get_banner_manifest())
-    print(remote._cache)

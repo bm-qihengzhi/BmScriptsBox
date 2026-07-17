@@ -108,6 +108,4 @@ class BmTools:
         return socket.waitForConnected(500)
 
 
-if __name__ == '__main__':
-    # print(BmTools.get_temp_context(r'C:\Users\89913\Desktop\11.txt'))
-    print(BmTools.get_script_dir_path(r'293cbc64-61cb-483e-aa02-94294fc3cfe6'))
+

@@ -91,7 +91,6 @@ class ArchiveExtractor:
             elif file_ext_lower.endswith('.bz2'):
                 self._run_single_bzip2_extraction(source_path, target_path)
             elif file_ext_lower.endswith('.exe'):
-                print('文件后缀为.exe')
                 target_path.rmdir()
                 return source_file
             elif file_ext_lower.endswith('.msi'):
@@ -161,12 +160,3 @@ class ArchiveExtractor:
             shutil.copyfileobj(f_in, f_out)
 
 
-if __name__ == '__main__':
-    print(Path(__file__).parent / '7zr.exe')  # 保持原样，同目录引用 PyInstaller 也兼容
-
-    # tool = r'D:\PythonCode\BmScriptsBox-Code\app\utils\packages\7zr.exe'
-    # archive = r"D:\PythonCode\BmScriptsBox-Code\app\utils\packages\7zr.exe"
-    #
-    # extractor = ArchiveExtractor()
-    # result = extractor.extract(source_file=archive, remove_source=False)
-    # print(result)

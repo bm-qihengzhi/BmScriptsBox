@@ -1,9 +1,9 @@
 {
   "LANGUAGE": "zh_CN",
   "PROXIES": [
+    "https://v4.gh-proxy.org/",
     "https://gh-proxy.org/",
     "https://github.1zyq1.com/",
-    "https://v4.gh-proxy.org/",
     "https://v6.gh-proxy.org/",
     "https://cdn.gh-proxy.org/"
   ]

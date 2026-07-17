@@ -174,9 +174,8 @@ class ScheduledSetWidget(XDialog):
         layout.setSpacing(6)
 
         placeholder_map = {
-            'directory': ['文件夹路径', '请输入文件夹路径参数 一行一个'],
-            'file': ['文件路径', '请输入文件路径参数 一行一个'],
-            'string': ['文本内容', '请输入文本参数'],
+            'paths': ['文件路径', '请输入路径参数 一行一个'],
+            'text': ['文本内容', '请输入文本参数'],
         }
 
         for idx, inp in enumerate(inputs_schema):
@@ -197,7 +196,7 @@ class ScheduledSetWidget(XDialog):
 
             self.edit = XTextEdit(placeholder=ph)
             self.edit.setMaximumHeight(100)
-            self._param_inputs[idx] = {'widget': self.edit, 'type': 'text' if ptype == 'string' else 'paths'}
+            self._param_inputs[idx] = {'widget': self.edit, 'type': 'text' if ptype == 'text' else 'paths'}
 
             layout.addWidget(XLabel(f"脚本参数：{name}"))
             layout.addWidget(self.edit)

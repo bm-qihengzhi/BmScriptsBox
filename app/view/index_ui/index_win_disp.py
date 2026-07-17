@@ -284,6 +284,7 @@ class MainView(XWidget):
             update_window = UpdateWidget(
                 data.get("remote_version"),
                 data.get("diff"),
+                data.get("remote_details"),
                 self.window()
             )
             update_window.completed_single.connect(self._on_update_completed)

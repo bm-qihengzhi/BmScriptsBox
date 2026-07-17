@@ -373,22 +373,4 @@ class SoftwareInstallerConfig:
         return {}
 
 
-# 使用示例
-if __name__ == "__main__":
-    # 创建安装器实例
-    installer = SilentInstaller()
-    
-    # 连接信号
-    installer.progress_signal.connect(lambda msg: print(f"进度: {msg}"))
-    installer.status_signal.connect(lambda msg: print(f"状态: {msg}"))
-    installer.log_signal.connect(lambda msg: print(f"日志: {msg}"))
-    
-    # 示例1: 安装单个软件
-    success, path = installer.install_software(
-        r"C:\Users\89913\Downloads\python-3.9.5.exe", r'D:\python395',
-        binary_name='python.exe',
-    )
-    
-    print(f"安装结果: {success}")
-    print(f"安装结果: {path}")
     

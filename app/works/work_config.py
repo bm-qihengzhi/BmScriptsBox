@@ -4,9 +4,6 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: AGPL-3.0
 """
 import json
-from pathlib import Path
-from pprint import pprint
-
 from PySide2.QtCore import QThread, Signal
 from app.data import ProjectGlobal
 from app.utils import BmTools
@@ -38,10 +35,4 @@ class ConfigWork(QThread):
         self.config_loaded.emit()
 
 
-if __name__ == '__main__':
-    from app.utils import BmTools
-    config_path = BmTools.get_resources_path() / "configs.json"
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-        print(type(config))
-        pprint(config)
+

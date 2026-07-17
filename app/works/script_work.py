@@ -419,6 +419,3 @@ class ReadScriptsThread(QThread):
 
 
 
-if __name__ == '__main__':
-   from app.utils import BmTools
-   print(BmTools.get_root_path() / 'BmScripts')
