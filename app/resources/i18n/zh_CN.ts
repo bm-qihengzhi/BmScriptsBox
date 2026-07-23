@@ -856,17 +856,17 @@
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Categories:</source>
-        <translation>脚本分类：</translation>
+        <translation>脚本分类:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Repo url:</source>
-        <translation>仓库地址：</translation>
+        <translation>仓库地址:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Repo branch:</source>
-        <translation>仓库分支：</translation>
+        <translation>仓库分支:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
@@ -876,32 +876,32 @@
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Likes:</source>
-        <translation>点赞数：</translation>
+        <translation>点赞数:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Downloads:</source>
-        <translation>下载量：</translation>
+        <translation>下载量:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Name:</source>
-        <translation>名字：</translation>
+        <translation>名字:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Version:</source>
-        <translation>版本：</translation>
+        <translation>版本:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Language:</source>
-        <translation>语言：</translation>
+        <translation>语言:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Status:</source>
-        <translation>状态：</translation>
+        <translation>状态:</translation>
     </message>
     <message>
         <location filename="cloud/view/publish_win.py" line="101"/>
@@ -922,6 +922,26 @@
         <location filename="cloud/view/publish_win.py" line="101"/>
         <source>Please make sure all related scripts are stopped before updating.</source>
         <translation>请确保所有相关脚本在更新前已停止。</translation>
+    </message>
+    <message>
+        <location filename="cloud/view/market_win.py" line="101"/>
+        <source>Updated</source>
+        <translation>最近更新</translation>
+    </message>
+    <message>
+        <location filename="cloud/view/market_win.py" line="101"/>
+        <source>Published</source>
+        <translation>最新发布</translation>
+    </message>
+    <message>
+        <location filename="cloud/view/market_win.py" line="101"/>
+        <source>Classify:</source>
+        <translation>分类:</translation>
+    </message>
+    <message>
+        <location filename="cloud/view/market_win.py" line="101"/>
+        <source>Sort:</source>
+        <translation>排序:</translation>
     </message>
 </context>
 </TS>
