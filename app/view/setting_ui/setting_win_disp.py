@@ -76,6 +76,7 @@ class SettingWidget(QWidget):
 
     def _init_sigal(self):
         self.middle_click_switch.clicked.connect(partial(self.presenter.update_setting, name='mouse_middle'))
+        self.start_tray_switch.clicked.connect(partial(self.presenter.update_setting, name='start_to_tray'))
         self.auto_start_switch.clicked.connect(self.presenter.add_to_startup)
         self.hotkey_combo.currentIndexChanged.connect(self.presenter.update_hotkey)
         self.check_log_btn.clicked.connect(self.presenter.check_log)
@@ -94,6 +95,7 @@ class SettingWidget(QWidget):
 
     def update_setting(self, config):
         self.middle_click_switch.setChecked(config.get('mouse_middle'))
+        self.start_tray_switch.setChecked(config.get('start_to_tray'))
         self.auto_start_switch.setChecked(config.get('follow_start'))
 
         self.hotkey_combo.blockSignals(True)
@@ -133,6 +135,13 @@ class SettingWidget(QWidget):
         self.middle_click_switch = XSwitch(size=XSize.SMALL, text_on='', text_off='')
         self.middle_click_switch.setObjectName('mouse_middle')
         self.basic_setting_card.addWidget(self.middle_click_switch, group_index=mouse_group.index, stretch=0)
+
+        # 启动到托盘
+        start_tray_group = self.basic_setting_card.add_group()
+        self.basic_setting_card.addWidget(XLabel(tr('Start to Tray')), group_index=start_tray_group.index, stretch=1)
+        self.start_tray_switch = XSwitch(size=XSize.SMALL, text_on='', text_off='')
+        self.start_tray_switch.setObjectName('start_to_tray')
+        self.basic_setting_card.addWidget(self.start_tray_switch, group_index=start_tray_group.index, stretch=0)
 
         # 快捷键唤醒
         hotkey_group = self.basic_setting_card.add_group()

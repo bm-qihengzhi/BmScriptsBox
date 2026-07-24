@@ -75,7 +75,12 @@ def main():
     # 6. 启动窗口
     global main_window
     main_window = MainView()
-    main_window.show()
+    from app.data.database import ConfigDatabase
+    config = ConfigDatabase().get_all()
+    if not config.get('start_to_tray', False):
+        main_window.show()
+    else:
+        main_window._tray_started = True
     sys.exit(app.exec_())
 
 

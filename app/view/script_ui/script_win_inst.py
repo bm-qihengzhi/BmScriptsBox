@@ -7,7 +7,7 @@ from pathlib import Path
 
 from xsideui import XPushButton, XLineEdit, XTextEdit, IconName, XButtonVariant, XColor, XDialog, \
     tr, XCard, XLabel, XTabWidget
-from PySide2.QtCore import Qt, Signal, QTimer
+from PySide2.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve
 from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QApplication, QFormLayout, QGridLayout
 
 from app.utils import BmTools
@@ -40,6 +40,17 @@ class InstallScriptWindow(XDialog):
         self.show_local = show_local
         self._setup_ui()
         self.setModal(True)
+        self.setWindowOpacity(0.0)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        anim = QPropertyAnimation(self, b"windowOpacity")
+        anim.setDuration(200)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.start()
+        self._fade_anim = anim
 
     def _setup_ui(self):
         self.setMinimumWidth(360)

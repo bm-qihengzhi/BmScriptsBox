@@ -5,9 +5,10 @@ SPDX-License-Identifier: AGPL-3.0
 """
 import ctypes
 import importlib.util
-from PySide2.QtCore import QTimer, QObject, Signal, QPoint, QEvent
+from PySide2.QtCore import QTimer, QObject, Signal, QPoint, QEvent, QPropertyAnimation, QEasingCurve
 from PySide2.QtGui import QIcon, Qt
-from PySide2.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QSystemTrayIcon, QFrame, QWidget, QVBoxLayout
+from PySide2.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QSystemTrayIcon, QFrame, QWidget, QVBoxLayout, \
+    QGraphicsOpacityEffect, QLabel
 from xsideui import XMenu, XNavSimple, IconName, XIcon, XWidget, tr, XColor, XIconBadge, XPushButton, XButtonVariant, \
     XSize, XImage, XDialog, XLabel
 
@@ -121,7 +122,7 @@ class MainView(XWidget):
         if HAS_MARKET:
             from app.cloud.view.market_ui.market_win import MarketWidget
             if MarketWidget:
-                self.stack.setCurrentIndex(7)
+                self._on_switch_page(7)
                 self.nav_bar.set_current_item("market")
                 return
         from ..script_ui.script_win_inst import InstallScriptWindow
@@ -177,6 +178,10 @@ class MainView(XWidget):
         self.tray.activated.connect(self.presenter.on_tray_activated)
         self.tray.show()
 
+        BmNotify().show_success_notify('不忙脚本盒子已启动在系统托盘', duration=3000, show_close=False)
+
+
+
     def _init_presenter_signals(self):
         """连接 Presenter 信号"""
         self.presenter.show_window.connect(self._on_show_window)
@@ -199,7 +204,7 @@ class MainView(XWidget):
 
         if not HAS_USER:
             return
-        self.stack.setCurrentIndex(6)
+        self._on_switch_page(6)
         if hasattr(self.settings_widget, 'tabs'):
             self.settings_widget.tabs.setCurrentIndex(2)
 
@@ -244,11 +249,51 @@ class MainView(XWidget):
         user32.ShowWindow(hwnd, SW_SHOW)
         user32.SetActiveWindow(hwnd)
 
+        if getattr(self, '_pending_update', None):
+            data = self._pending_update
+            self._pending_update = None
+            QTimer.singleShot(500, lambda d=data: self._do_show_update(d))
+
     def _on_switch_page(self, index: int):
-        """切换页面"""
+        """切换页面（淡入淡出过渡）"""
+        if self.stack.currentIndex() == index:
+            return
+        self._cancel_page_anim()
+
+        old_page = self.stack.currentWidget()
+        pixmap = old_page.grab() if old_page and old_page.isVisible() else None
+
         self.stack.setCurrentIndex(index)
+
+        if pixmap:
+            overlay = QLabel(self.stack)
+            overlay.setPixmap(pixmap)
+            overlay.setGeometry(self.stack.rect())
+            overlay.show()
+            overlay.raise_()
+
+            effect = QGraphicsOpacityEffect(overlay)
+            overlay.setGraphicsEffect(effect)
+
+            anim = QPropertyAnimation(effect, b"opacity")
+            anim.setDuration(180)
+            anim.setStartValue(1.0)
+            anim.setEndValue(0.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.finished.connect(overlay.deleteLater)
+            anim.start()
+            self._anim_group = anim
+
         if hasattr(self, 'settings_widget'):
             self.settings_widget.tabs.setCurrentIndex(0)
+
+    def _cancel_page_anim(self):
+        if hasattr(self, '_anim_group') and self._anim_group:
+            self._anim_group.stop()
+            self._anim_group = None
+
+    def _cleanup_page_anim(self):
+        self._anim_group = None
 
     def _on_request_notify(self, data: tuple):
         """显示通知"""
@@ -267,7 +312,7 @@ class MainView(XWidget):
 
     def _on_show_login(self):
         """显示登录"""
-        self.stack.setCurrentIndex(6)
+        self._on_switch_page(6)
         self.nav_bar.set_current_item("me")
         if hasattr(self, 'login_widget'):
             QTimer.singleShot(100, self.login_widget.start_login)
@@ -278,7 +323,14 @@ class MainView(XWidget):
             QTimer.singleShot(100, self.login_widget.stop)
 
     def _on_show_update(self, data: dict):
-        """显示更新"""
+        """显示更新（信号入口，托盘模式时延后）"""
+        if getattr(self, '_tray_started', False):
+            self._pending_update = data
+            return
+        self._do_show_update(data)
+
+    def _do_show_update(self, data: dict):
+        """实际弹出更新窗口"""
         if data.get("has_updates"):
             from ..update_ui import UpdateWidget
             update_window = UpdateWidget(

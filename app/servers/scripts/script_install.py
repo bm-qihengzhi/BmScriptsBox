@@ -439,6 +439,16 @@ class InstallScript(QObject):
             pm.packages_progress.connect(self.progress_signal.emit)
             pm.batch_install_cli(config.runtime.binaries)
 
+        # 处理 AI 模型下载（失败则终止安装）
+        if config.models:
+            self._emit_progress("同步 AI 模型资源...")
+            self._emit_progress("模型下载预计需要 60 秒...")
+            from app.servers.models import ModelManager
+            mm = ModelManager()
+            mm.model_progress.connect(lambda d: self.progress_signal.emit(d))
+            if not mm.batch_download(config.models):
+                raise RuntimeError("模型下载失败，安装已终止")
+
     def _register_system(self, config, badge:str=''):
         """执行数据库持久化和系统菜单注册"""
         self._emit_progress("正在注册系统组件...")

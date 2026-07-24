@@ -96,6 +96,28 @@ class FlaskServer:
             except Exception as e:
                 return flask.jsonify({"success": False}), 500
 
+        @self.app.route('/api/model/path', methods=['GET'])
+        def get_model_path():
+            """查询已下载 AI 模型的本地路径，供脚本加载模型时使用"""
+            repo_id = flask.request.args.get('repo_id')
+            if not repo_id:
+                return flask.jsonify({"code": 400, "message": "缺少 repo_id 参数"}), 400
+
+            from app.servers.models import ModelManager
+            path = ModelManager().get_model_path(repo_id)
+            if not path:
+                return flask.jsonify({"success": False,
+                                      "code": 404,
+                                      "message": f"模型 {repo_id} 未下载",
+                                      "data":{}}), 404
+
+            return flask.jsonify({
+                "success": True,
+                "code": 200,
+                "message": f"模型{repo_id}路径获取成功",
+                "data": {"repo_id": repo_id, "path": path}
+            })
+
     def _setup_closed_routes(self):
         """可选注册闭源业务路由"""
         try:

@@ -30,7 +30,7 @@ class PackagesManager(QObject):
         super().__init__()
         self.base_path = self._get_base_path()
         self.base_path.mkdir(parents=True, exist_ok=True)
-        self.json_file = self.base_path / "BmPackage.json"
+        self.json_file = BmTools.get_root_path() / "BmData" / "BmPackage.json"
 
         # 内部状态
         self.downloader = None
@@ -54,7 +54,9 @@ class PackagesManager(QObject):
             local_res = matcher.find_best_local_version(local_data, package_name, version_requirement)
 
             if local_res.found:
-                return str(local_res.path)
+                if local_res.path and Path(local_res.path).exists():
+                    return str(local_res.path)
+                BM_LOG.warning(f"软件包 {package_name} 记录存在但文件已丢失，重新下载")
 
             # 2. 远程发现
             self._emit_status(f"正在从云端获取 {package_name} 清单...")

@@ -47,7 +47,22 @@ class ScriptInfo(BaseModel):
         return self
 
 
-# --- 2. 运行时子模型 ---
+# --- 2. AI 模型声明 ---
+class ScriptModel(BaseModel):
+    source: str = "modelscope"
+    repo_id: str = Field(min_length=1)
+    files: List[str] = Field(default_factory=lambda: ["*"])
+
+    @field_validator('source')
+    @classmethod
+    def check_source(cls, v: str) -> str:
+        allowed = {"modelscope", "huggingface"}
+        if v.lower() not in allowed:
+            raise ValueError(f"source 必须是 {allowed} 之一，当前值: '{v}'")
+        return v.lower()
+
+
+# --- 3. 运行时子模型 ---
 class ScriptRuntime(BaseModel):
     language: str = Field(min_length=1)
     language_version: str
@@ -96,7 +111,7 @@ class ScriptRuntime(BaseModel):
         return self
 
 
-# --- 3. 触发器子模型 (重点) ---
+# --- 4. 触发器子模型 (重点) ---
 class ContextMenuConfig(BaseModel):
     enabled: bool = False
     targets: List[str] = Field(default_factory=list)
@@ -119,7 +134,7 @@ class TriggersConfig(BaseModel):
     quick_copy: QuickCopyConfig = Field(default_factory=QuickCopyConfig)
 
 
-# --- 4. IO 与 工作流 ---
+# --- 5. IO 与 工作流 ---
 class IOParam(BaseModel):
     name: str = ""
     type: str = ""
@@ -127,7 +142,7 @@ class IOParam(BaseModel):
     description: str = ""
 
 
-# --- 5. 顶层根模型 ---
+# --- 6. 顶层根模型 ---
 class ScriptTomlConfig(BaseModel):
     info: ScriptInfo
     runtime: ScriptRuntime
@@ -135,6 +150,7 @@ class ScriptTomlConfig(BaseModel):
     inputs: List[IOParam] = Field(default_factory=list)
     outputs: List[IOParam] = Field(default_factory=list)
     workflow: Dict[str, bool] = Field(default_factory=lambda: {"workflow_enabled": True})
+    models: List[ScriptModel] = Field(default_factory=list)
 
     @model_validator(mode='after')
     def filter_empty_io(self):

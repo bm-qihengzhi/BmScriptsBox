@@ -1,6 +1,6 @@
 [project]
 name = "bmscriptsbox"
-version = "1.0.4"
+version = "1.1.0"
 description = "BmScriptsBox - Windows跨语言脚本调度与管理软件"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -35,7 +35,11 @@ dependencies = [
     "toml==0.10.2",
     "packaging==26.2",
     "pywin32==311",
-    "keyboard==0.13.5"
+    "keyboard==0.13.5",
+    "huggingface_hub>=0.20.0",
+    "tqdm",
+    "pyyaml",
+    "filelock"
 ]
 
 [project.urls]

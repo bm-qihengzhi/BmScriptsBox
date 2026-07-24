@@ -71,6 +71,7 @@ class Config(BaseModel):
     shortcut_key_rouse = TextField(default=json.dumps([]))  # 改为列表存储  # 快捷键列表
     desktop_inform = BooleanField(default=True)  # 是否启用桌面通知
     follow_start = BooleanField(default=False)  # 是否跟随启动
+    start_to_tray = BooleanField(default=False)  # 启动时隐藏到托盘
 
     class Meta:
         table_name = "app_config"
@@ -117,11 +118,17 @@ def ensure_tables():
     if _tables_initialized:
         return
     db.create_tables([Script, Config, Task], safe=True)
+    # 迁移：新增列（兼容已有数据库）
+    try:
+        db.execute_sql("ALTER TABLE app_config ADD COLUMN start_to_tray INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
     if not Config.select().exists():
         Config.create(
             mouse_middle=True,
-            shortcut_key_rouse=json.dumps(['f12']),
+            shortcut_key_rouse=json.dumps(['ctrl']),
             desktop_inform=True,
-            follow_start=False
+            follow_start=False,
+            start_to_tray=False
         )
     _tables_initialized = True

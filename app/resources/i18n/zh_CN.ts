@@ -943,5 +943,10 @@
         <source>Sort:</source>
         <translation>排序:</translation>
     </message>
+        <message>
+        <location filename="cloud/view/market_win.py" line="101"/>
+        <source>Start to Tray</source>
+        <translation>启动到托盘</translation>
+    </message>
 </context>
 </TS>
