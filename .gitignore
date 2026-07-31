@@ -113,6 +113,7 @@ BmPackages
 app/data/app_scripts.db
 app/resources/version.json
 app/resources/banner.json.bak
+app/cloud
 1.0.0.iss
 runtime
 BmCache
