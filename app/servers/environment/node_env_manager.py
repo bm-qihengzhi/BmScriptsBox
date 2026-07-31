@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, Dict
 from PySide2.QtCore import QObject, Signal, QCoreApplication
 from app.utils import BmTools, BM_LOG
+from app.utils.region import is_china
 from app.servers.packages import PackagesManager
 
 
@@ -179,8 +180,9 @@ class NodeEnvManager(QObject):
         cache_path.mkdir(parents=True, exist_ok=True)
         store_path.mkdir(parents=True, exist_ok=True)
 
+        registry_url = "https://registry.npmmirror.com/" if is_china() else "https://registry.npmjs.org/"
         npmrc_content = (
-            "registry=https://registry.npmmirror.com/\n"
+            f"registry={registry_url}\n"
             f"cache-dir={cache_path}\n"
             f"store-dir={store_path}\n"
             "use-hardlinks=true\n"

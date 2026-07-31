@@ -20,9 +20,9 @@ class ScriptPresenter(QObject):
     def __init__(self):
         super().__init__()
         self.banner_data = None
-        self._script_work_thread = None
         self._execute_workers = {}
-        self.uninstall = None
+        self._uninstall_workers = {}
+        self._read_threads = set()
 
     def lazy_loading(self):
         self._load_banner()
@@ -45,9 +45,11 @@ class ScriptPresenter(QObject):
 
     def _load_scripts(self):
         from app.works.script_work import ReadScriptsThread
-        self._script_work_thread = ReadScriptsThread()
-        self._script_work_thread.get_scripts_signal.connect(self._on_scripts_loaded)
-        self._script_work_thread.start()
+        thread = ReadScriptsThread()
+        thread.get_scripts_signal.connect(self._on_scripts_loaded)
+        thread.finished.connect(lambda t=thread: self._read_threads.discard(t))
+        self._read_threads.add(thread)
+        thread.start()
 
     def _on_scripts_loaded(self, scripts_data: list):
         self.scripts_loaded.emit(scripts_data)
@@ -99,9 +101,14 @@ class ScriptPresenter(QObject):
 
     def uninstall_script(self, script_id):
         from app.works.script_work import UninstallScriptWork
-        self.uninstall =UninstallScriptWork(script_id)
-        self.uninstall.finished_signal.connect(self._on_uninstall_script)
-        self.uninstall.start()
+        if script_id in self._uninstall_workers:
+            BM_LOG.warning(f"脚本 {script_id} 正在卸载中，跳过重复操作")
+            return
+        worker = UninstallScriptWork(script_id)
+        worker.finished_signal.connect(self._on_uninstall_script)
+        worker.finished.connect(lambda sid=script_id: self._uninstall_workers.pop(sid, None))
+        self._uninstall_workers[script_id] = worker
+        worker.start()
 
     def _on_executed(self,state):
         BmNotify().show_info_notify(content='正在执行脚本')

@@ -7,7 +7,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 
 from PySide2.QtCore import QObject, Signal
 
@@ -85,25 +85,25 @@ class PackagesManager(QObject):
             extracted_path = Path(extractor.extract(zip_path))
 
             # 5. 定位执行文件
-            bin_path = self._resolve_bin_path(extracted_path, payload.get('bin'))
+            bin_paths = self._resolve_bin_paths(extracted_path, payload.get('bin'))
 
             # 6. 处理静默安装 (EXE/MSI)
             if payload.get('silent_install'):
-                bin_path = self._handle_silent_install(package_name, cloud_res.version, bin_path, payload)
+                bin_paths = self._handle_silent_install(package_name, cloud_res.version, bin_paths, payload)
 
             # 7. 环境变量与持久化
             if payload.get('env_set'):
-                self._create_shim_exe(bin_path, package_name)
+                self._create_shim_exes(bin_paths, package_name)
                 self._emit_status("环境变量 Shim 重定向已创建")
 
-            self._update_manifest(package_name, str(bin_path), cloud_res.version)
+            self._update_manifest(package_name, bin_paths, cloud_res.version)
 
             # 8. 清理临时文件
             if Path(extracted_path).is_dir():
                 self._safe_unlink(zip_path)
 
             self._emit_status(f"{package_name} 安装成功")
-            return str(bin_path)
+            return str(bin_paths[0])
 
         except Exception as e:
             BM_LOG.error(f"安装 {package_name} 失败: {e}")
@@ -163,56 +163,81 @@ class PackagesManager(QObject):
         except Exception:
             return {}
 
-    def _update_manifest(self, name: str, path: str, version: str):
+    def _update_manifest(self, name: str, paths: List[Path], version: str):
         """原子化更新本地包索引"""
         data = self._read_manifest()
         if name not in data: data[name] = {"versions": {}}
 
-        data[name]["versions"][version] = {"path": path}
+        data[name]["versions"][version] = {
+            "path": str(paths[0]),
+            "paths": [str(p) for p in paths]
+        }
 
         with open(self.json_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
 
-    def _resolve_bin_path(self, extract_dir: Path, bin_name: Optional[str]) -> Path:
-        """智能定位执行文件"""
-        if not bin_name: return extract_dir
+    def _resolve_bin_paths(self, extract_dir: Path, bin_names: List[str]) -> List[Path]:
+        """智能定位执行文件列表，支持多二进制"""
+        if not bin_names:
+            return [extract_dir]
 
-        # 1. 直接匹配
-        direct = extract_dir / bin_name
-        if direct.exists(): return direct
+        # 单文件下载（.exe/.msi 等非压缩包）：直接匹配文件名
+        if extract_dir.is_file():
+            for bin_name in bin_names:
+                if extract_dir.name == bin_name:
+                    return [extract_dir]
+            return [extract_dir]
 
-        # 2. 递归查找
-        for found in extract_dir.rglob(bin_name):
-            if found.is_file(): return found
+        results = []
+        for bin_name in bin_names:
+            # 1. 直接匹配
+            direct = extract_dir / bin_name
+            if direct.exists():
+                results.append(direct)
+                continue
 
-        return extract_dir  # 回退
+            # 2. 递归查找
+            found = False
+            for found_path in extract_dir.rglob(bin_name):
+                if found_path.is_file():
+                    results.append(found_path)
+                    found = True
+                    break
 
-    def _handle_silent_install(self, name: str, ver: str, installer_path: Path, payload: Dict) -> Path:
-        """处理二进制静默安装流程"""
+            if not found:
+                results.append(extract_dir / bin_name)  # 回退
+
+        return results
+
+    def _handle_silent_install(self, name: str, ver: str, installer_paths: List[Path], payload: Dict) -> List[Path]:
+        """处理二进制静默安装流程，支持多二进制输出"""
         self._emit_status(f"检测到安装程序，正在执行静默部署...")
         install_dir = self.base_path / "cli" / name / ver
 
         installer = SilentInstaller()
-        success, final_path = installer.install_software(
-            installer_path=str(installer_path),
+        success, _ = installer.install_software(
+            installer_path=str(installer_paths[0]),
             install_dir=str(install_dir),
             binary_name=payload.get('bin')
         )
         if not success:
             raise RuntimeError(f"静默安装失败: {name}")
-        return Path(final_path)
+        return [Path(install_dir) / bn for bn in payload.get('bin')]
 
-    def _create_shim_exe(self, source_path: Path, package_name: str):
-        """创建 Windows Shim (原生 exe 重定向)"""
+    def _create_shim_exes(self, source_paths: List[Path], package_name: str):
+        """创建 Windows Shim (原生 exe 重定向)，支持多二进制"""
         bin_dir = self.base_path / 'bin'
         bin_dir.mkdir(exist_ok=True)
 
         launcher = Path(__file__).parent / 'shim-launcher.exe'
-        shim_path = bin_dir / f"{package_name}.exe"
-        shutil.copy(launcher, shim_path)
+        for source_path in source_paths:
+            resolved = source_path.resolve()
+            shim_name = package_name if len(source_paths) == 1 else resolved.stem
+            shim_path = bin_dir / f"{shim_name}.exe"
+            shutil.copy(launcher, shim_path)
 
-        target_path = bin_dir / f"{package_name}.target"
-        target_path.write_text(str(source_path.resolve()), encoding='utf-8')
+            target_path = bin_dir / f"{shim_name}.target"
+            target_path.write_text(str(resolved), encoding='utf-8')
 
     def _create_uv_config(self, toml_path: Path):
         """生成 UV 配置文件并注入加速源"""

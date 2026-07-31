@@ -3,9 +3,6 @@ Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
 SPDX-License-Identifier: AGPL-3.0
 """
-import os
-import shutil
-import stat
 import time
 from pathlib import Path
 import pythoncom
@@ -104,6 +101,7 @@ class InstallGitScriptWork(QThread):
 class UninstallScriptWork(QThread):
     """
     卸载异步线程
+    先删数据库/菜单/快捷键，立即刷新 UI，后台再重试删目录
     """
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
@@ -115,192 +113,46 @@ class UninstallScriptWork(QThread):
     def _emit_progress(self, step: int, message: str):
         self.progress_signal.emit({'step': step, 'message': message, 'script_id': self.script_id})
 
-    def _remove_temp_dir(self, temp_dir: Path) -> bool:
-        """带重试和权限修复的临时目录删除"""
-        def _try_rmtree(path, use_repair=False):
-            if not use_repair:
-                shutil.rmtree(path)
-            else:
-                def on_rm_error(func, p, exc_info):
-                    os.chmod(p, stat.S_IWRITE)
-                    func(p)
-                shutil.rmtree(path, onerror=on_rm_error)
-
-        def _long_rmtree(path):
-            long_root = '\\\\?\\' + str(path.resolve())
-            for root, dirs, files in os.walk(long_root, topdown=False):
-                for name in files:
-                    p = os.path.join(root, name)
-                    try:
-                        os.chmod(p, stat.S_IWRITE)
-                        os.remove(p)
-                    except Exception:
-                        pass
-                for name in dirs:
-                    p = os.path.join(root, name)
-                    try:
-                        os.rmdir(p)
-                    except Exception:
-                        pass
-            try:
-                os.rmdir(long_root)
-            except Exception:
-                pass
-            return not path.exists()
-
-        # 首次尝试
-        try:
-            _try_rmtree(temp_dir)
-            if not temp_dir.exists():
-                return True
-        except Exception as e:
-            BM_LOG.warning(f"[Step 1] 快速删除失败: {e}")
-            # 失败后立即尝试 \\?\ 长路径删除（针对超长路径、损坏 symlink 等场景）
-            BM_LOG.info(f"[Step 1] 立即尝试长路径删除: {temp_dir}")
-            if _long_rmtree(temp_dir):
-                return True
-        # 锁定/权限类错误的重试（路径过长类错误已经被 \\?\ 处理掉了）
-        max_attempts = 3
-        wait = 1
-        for attempt in range(max_attempts):
-            try:
-                _try_rmtree(temp_dir, use_repair=(attempt > 0))
-                if not temp_dir.exists():
-                    return True
-            except Exception as e:
-                BM_LOG.warning(f"[Step 1] 删除尝试 {attempt + 1}/{max_attempts} 失败: {e}")
-                if attempt < max_attempts - 1:
-                    time.sleep(wait)
-                    wait *= 2
-        # 锁定等待兜底
-        try:
-            time.sleep(5)
-            _try_rmtree(temp_dir, use_repair=True)
-            if not temp_dir.exists():
-                BM_LOG.info(f"[Step 1] 长等待后删除成功: {temp_dir}")
-                return True
-        except Exception:
-            pass
-        # 仍失败则标记重启后删除
-        try:
-            import ctypes
-            ctypes.windll.kernel32.MoveFileExW(str(temp_dir), None, 4)
-            BM_LOG.info(f"[Step 1] 已标记重启后删除: {temp_dir}")
-            return True
-        except Exception as e:
-            BM_LOG.warning(f"[Step 1] 标记重启删除失败: {e}")
-        return False
-
-    def _rename_script(self, script_dir_path, temp_path):
-        """原子重命名（重试 3 次，应对瞬时锁）"""
-        for i in range(3):
-            try:
-                script_dir_path.rename(temp_path)
-                return True
-            except PermissionError:
-                if i < 2:
-                    BM_LOG.warning(f"[Uninstall] 目录被占用(重试 {i+1}/3)...")
-                    time.sleep(1)
-                continue
-            except Exception as e:
-                BM_LOG.error(f"[Uninstall] 目录重命名失败，原因: {str(e)}")
-                return False
-        BM_LOG.error(f"[Uninstall] 目录重命名重试 3 次均失败")
-        return False
-
     def run(self):
         script_id = self.script_id
         script_dir_path = BmTools.get_script_dir_path(script_id)
-        temp_dir = script_dir_path.parent/ f"{script_id}_uninstall_{int(time.time())}"
-
-        cleanup_results = {
-            'directory': False,
-            'database': False,
-            'context': False,
-            'tasks': False,
-            'hotkeys': False
-        }
+        results = {'database': False, 'context': False, 'tasks': False, 'hotkeys': False}
 
         try:
-            # 1. 目录清理
-            self._emit_progress(1, '正在删除文件...')
+            # === 快速路径：数据库 + 菜单 + 任务 + 快捷键 ===
+            results['database'] = ScriptDatabase.delete_script(script_id)
+
+            self._emit_progress(1, '正在清理菜单...')
+            ContextManager().remove_script_menu(script_id)
+            results['context'] = True
+
+            self._emit_progress(2, '正在清理关联任务...')
+            TaskDatabase().delete_task_by_script_id(script_id)
+            results['tasks'] = True
+
+            self._emit_progress(3, '正在重载快捷键...')
+            HotkeyManager().reload_hotkeys()
+            results['hotkeys'] = True
+
+            # 通知 UI 刷新（脚本从列表消失）
+            self.finished_signal.emit({'state': True, 'message': '卸载成功', 'script_id': script_id})
+
+            # === 慢速路径：删目录（静默重试）===
             if script_dir_path.exists():
-                if not script_dir_path.is_dir():
-                    BM_LOG.error(f"[Step 1] 错误: {script_id} 路径不是文件夹")
-                    cleanup_results['directory'] = False
-                elif self._rename_script(script_dir_path, temp_dir):
-                    if self._remove_temp_dir(temp_dir):
-                        cleanup_results['directory'] = True
-                    else:
-                        BM_LOG.warning(f"[Step 1] 文件句柄占用无法删除，残留目录: {temp_dir}")
-                        cleanup_results['directory'] = True
-                else:
-                    BM_LOG.warning("[Step 1] 目录重命名失败，尝试就地删除...")
-                    if self._remove_temp_dir(script_dir_path):
-                        cleanup_results['directory'] = True
-                    else:
-                        try:
-                            import ctypes
-                            ctypes.windll.kernel32.MoveFileExW(str(script_dir_path.resolve()), None, 4)
-                            BM_LOG.info("[Step 1] 已标记重启后删除")
-                            cleanup_results['directory'] = True
-                        except Exception as e:
-                            BM_LOG.warning(f"[Step 1] 标记重启删除失败: {e}")
-                            cleanup_results['directory'] = False
-            else:
-                cleanup_results['directory'] = True
-
-            # 2. 数据库记录清理
-            self._emit_progress(2, '正在清理数据库...')
-            try:
-                cleanup_results['database'] = ScriptDatabase.delete_script(script_id)
-            except Exception as e:
-                BM_LOG.error(f"[Step 2] 数据库清理崩溃: {e}")
-
-            # 3. 菜单清理
-            self._emit_progress(3, '正在清理菜单...')
-            try:
-                ContextManager().remove_script_menu(script_id)
-                cleanup_results['context'] = True
-            except Exception as e:
-                BM_LOG.error(f"[Step 3] 菜单清理崩溃: {e}")
-
-            # 4. 任务清理
-            self._emit_progress(4, '正在清理关联任务...')
-            try:
-                TaskDatabase().delete_task_by_script_id(script_id)
-                cleanup_results['tasks'] = True
-            except Exception as e:
-                BM_LOG.error(f"[Step 4] 任务清理崩溃: {e}")
-
-            # 5. 刷新环境
-            self._emit_progress(5, '正在重载快捷键...')
-            try:
-                HotkeyManager().reload_hotkeys()
-                cleanup_results['hotkeys'] = True
-            except Exception as e:
-                BM_LOG.error(f"[Step 5] 环境重载失败: {e}")
-
-            # --- 结果分析汇总 ---
-
-            if all(cleanup_results.values()):
-                BM_LOG.info(f"--- [Success] {script_id} 卸载完全成功 ---")
-                self.finished_signal.emit({'state': True, 'message': '卸载成功', 'script_id': script_id})
-            else:
-                # 找出失败的环节
-                failed_steps = [k for k, v in cleanup_results.items() if not v]
-                BM_LOG.error(f"--- [Failure] {script_id} 卸载部分失败, 失败环节: {failed_steps} ---")
-
-                if not cleanup_results['directory'] and script_dir_path.exists():
-                    msg = '文件被占用，请关闭相关程序后重试'
-                else:
-                    msg = f"卸载不彻底 ({', '.join(failed_steps)})"
-
-                self.finished_signal.emit({'state': False, 'message': msg, 'script_id': script_id})
+                for attempt in range(4):
+                    if BmTools.remove_dir(script_dir_path):
+                        BM_LOG.info(f"后台清理目录成功: {script_dir_path}")
+                        return
+                    if attempt < 3:
+                        time.sleep(2)  # 等文件锁释放
+                # 兜底：标记重启删除（非管理员则进待删队列，下次启动重试）
+                if not BmTools.mark_reboot_delete(script_dir_path):
+                    BmTools.add_pending_deletion(script_dir_path)
+                BM_LOG.warning(f"目录被占用，无法立即删除，已加入重启/启动清理: {script_dir_path}")
 
         except Exception as e:
-            BM_LOG.critical(f"[Critical] 线程运行中抛出未捕获异常: {e}", exc_info=True)
-            self.finished_signal.emit({'state': False, 'message': f"致命错误: {str(e)}", 'script_id': script_id})
+            BM_LOG.error(f"卸载异常: {e}", exc_info=True)
+            self.finished_signal.emit({'state': False, 'message': f"卸载出错: {str(e)}", 'script_id': script_id})
 
 
 class ExecuteScriptWork(QThread):

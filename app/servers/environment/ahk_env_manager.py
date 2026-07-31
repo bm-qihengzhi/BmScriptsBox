@@ -3,11 +3,10 @@ Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
 SPDX-License-Identifier: AGPL-3.0
 """
-import shutil
 from pathlib import Path
 from typing import Optional
 from PySide2.QtCore import QObject, Signal
-from app.utils import BM_LOG
+from app.utils import BM_LOG, BmTools
 from app.servers.packages import PackagesManager
 
 
@@ -80,9 +79,10 @@ class AhkEnvManager(QObject):
         try:
             path = Path(runtime_dir)
             if path.exists():
-                shutil.rmtree(path)
-                BM_LOG.info(f"成功清理 AHK 运行时: {runtime_dir}")
-                return True
+                if BmTools.remove_dir(path):
+                    BM_LOG.info(f"成功清理 AHK 运行时: {runtime_dir}")
+                    return True
+                BM_LOG.warning(f"清理 AHK 运行时失败（文件被占用）: {runtime_dir}")
             return False
         except Exception as e:
             BM_LOG.error(f"清理 AHK 运行时失败: {e}")

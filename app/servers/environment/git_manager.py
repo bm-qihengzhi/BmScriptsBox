@@ -3,13 +3,14 @@ Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
 SPDX-License-Identifier: AGPL-3.0
 """
-import shutil
 from pathlib import Path
 
 import pygit2
 
 from app.data import ProjectGlobal
-from app.utils import BM_LOG
+from app.utils import BM_LOG, BmTools
+from app.utils.proxy import get_sorted_proxies
+from app.utils.region import is_china
 
 
 class GitManager:
@@ -36,19 +37,14 @@ class GitManager:
 
             # 场景2：目录存在但没 git（上次安装异常）→ 清理后克隆
             if dir_path.exists():
-                for _ in range(3):
-                    try:
-                        shutil.rmtree(dir_path)
-                        break
-                    except Exception:
-                        continue
+                BmTools.remove_dir(dir_path)
 
             # 场景3：全新克隆
             dir_path.parent.mkdir(parents=True, exist_ok=True)
 
             urls = [git_url]
-            if 'github.com' in git_url:
-                urls = [p + git_url for p in self.github_proxies] + [git_url]
+            if 'github.com' in git_url and is_china():
+                urls = get_sorted_proxies(git_url) + [git_url]
 
             for url in urls:
                 try:
@@ -65,5 +61,5 @@ class GitManager:
         except Exception as e:
             BM_LOG.error(f"下载脚本失败: {e}")
             if dir_path.exists():
-                shutil.rmtree(dir_path, ignore_errors=True)
+                BmTools.remove_dir(dir_path)
             return False

@@ -98,7 +98,7 @@ class ContextManager:
                 found_parent = False
                 for parent_menu in config.get("menuItems", []):
                     # 匹配逻辑：target 是否在父菜单的支持列表里
-                    if target in parent_menu.get("target", []):
+                    if target in parent_menu.get("target", []) and "scriptId" not in parent_menu:
                         parent_menu.setdefault("submenu", [])
                         # 高效去重并添加
                         parent_menu["submenu"] = [i for i in parent_menu["submenu"] if i.get("scriptId") != script_id]

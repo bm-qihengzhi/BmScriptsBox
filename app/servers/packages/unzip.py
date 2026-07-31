@@ -13,6 +13,8 @@ import zipfile
 from pathlib import Path
 from typing import Union, Optional, List
 
+from app.utils import BmTools
+
 
 class ArchiveExtractor:
     """
@@ -108,7 +110,7 @@ class ArchiveExtractor:
         except Exception as e:
             # 失败清理：如果产生了文件夹但解压中断，则清理掉
             if target_path.exists() and any(target_path.iterdir()):
-                shutil.rmtree(target_path, ignore_errors=True)
+                BmTools.remove_dir(target_path)
             raise RuntimeError(f"解压失败: {str(e)}")
 
     # --- 具体的解压执行逻辑 ---

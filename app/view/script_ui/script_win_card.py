@@ -7,7 +7,7 @@ import webbrowser
 
 from PySide2.QtCore import Qt, Signal, QUrl, QSize
 from PySide2.QtGui import QDesktopServices
-from PySide2.QtWidgets import QVBoxLayout, QFrame, QLabel
+from PySide2.QtWidgets import QVBoxLayout, QFrame, QLabel, QSizePolicy
 
 from app.data import ScriptDatabase, ProjectGlobal
 from app.utils import BM_LOG, BmNotify
@@ -54,6 +54,10 @@ class ScriptCard(XCard):
         card_h = max(60, int(80 * scale))  # 80 是基准高度，按比例放大
         return QSize(card_w, card_h)
 
+    def minimumSizeHint(self):
+        # 最小宽度与建议宽度一致，长文本不得撑开流式布局
+        return self.sizeHint()
+
     def _setup_ui(self):
         """初始化 UI 组件"""
         context_widget = QFrame()
@@ -82,8 +86,11 @@ class ScriptCard(XCard):
 
     def _add_central(self):
         """添加中央布局"""
-        self.title_label = XLabel(self.script_info.name)
-        self.content_layout.addWidget(self.title_label, alignment=Qt.AlignCenter)
+        # 不能给 addWidget 传 alignment：那会让标签按 sizeHint 摆放（构造时被省略成 ...，sizeHint 塌缩）
+        # 改为标签填满卡片宽（Ignored），文本在标签内部居中
+        self.title_label = XLabel(self.script_info.name, elide_mode=True, alignment=Qt.AlignCenter)
+        self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.content_layout.addWidget(self.title_label)
         self.title_label.setContextMenuPolicy(Qt.NoContextMenu)  # 禁用右键菜单
         self.title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)  # 禁用鼠标事件
 

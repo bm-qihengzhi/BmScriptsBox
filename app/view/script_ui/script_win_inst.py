@@ -38,6 +38,7 @@ class InstallScriptWindow(XDialog):
         self.install_git = None
         self.btn_local = None
         self.show_local = show_local
+        self.setAcceptDrops(True)
         self._setup_ui()
         self.setModal(True)
         self.setWindowOpacity(0.0)
@@ -51,6 +52,35 @@ class InstallScriptWindow(XDialog):
         anim.setEasingCurve(QEasingCurve.OutCubic)
         anim.start()
         self._fade_anim = anim
+
+    def dragEnterEvent(self, event):
+        """拖拽进入：仅本地安装面板接受 .zip 文件"""
+        if not self.show_local or not hasattr(self, 'script_path_input'):
+            return
+        if not event.mimeData().hasUrls():
+            return
+        for url in event.mimeData().urls():
+            if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() == '.zip':
+                event.acceptProposedAction()
+                return
+
+    def dropEvent(self, event):
+        """松开拖拽：填入本地脚本路径，用户确认后安装"""
+        if not self.show_local or not hasattr(self, 'script_path_input'):
+            return
+        if not event.mimeData().hasUrls():
+            return
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.suffix.lower() == '.zip':
+                self.script_path_input.setText(str(path))
+                if hasattr(self, 'tab'):
+                    self.tab.setCurrentIndex(0)
+                event.acceptProposedAction()
+                return
+        self.append_styled_log('错误：只支持拖入 .zip 压缩包', 'ERROR')
 
     def _setup_ui(self):
         self.setMinimumWidth(360)
@@ -73,6 +103,7 @@ class InstallScriptWindow(XDialog):
         self.terminal.setPlaceholderText(tr('Waiting for task to start...'))
         self.terminal.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4;")
         self.terminal.setMinimumHeight(260)
+        self.terminal.setAcceptDrops(False)
 
         content_layout.addWidget(XLabel(tr('Install Log'), parent=self))
         content_layout.addWidget(self.terminal, 1)
@@ -91,6 +122,7 @@ class InstallScriptWindow(XDialog):
         lay.setSpacing(11)
 
         self.script_path_input = XLineEdit(placeholder=tr("Quick install via .zip file"))
+        self.script_path_input.setAcceptDrops(False)
         self.btn_browse = XPushButton(icon=IconName.FOLDER, variant=XButtonVariant.FILLED, color=XColor.TERTIARY)
         self.btn_local = XPushButton(tr('Install'), variant=XButtonVariant.FILLED)
         self.btn_browse.clicked.connect(self._browse_file)
@@ -107,9 +139,11 @@ class InstallScriptWindow(XDialog):
         lay_git.setSpacing(11)
         lay_git.addWidget(XLabel(tr('Repo url:：'), parent=self), 0,0)
         self.git_input = XLineEdit(placeholder=tr("GitHub repo URL only (HTTPS)"))
+        self.git_input.setAcceptDrops(False)
         lay_git.addWidget(self.git_input, 0 , 1, 1, 2)
         lay_git.addWidget(XLabel(tr('Repo branch:'), parent=self), 1, 0)
         self.branch_input = XLineEdit(placeholder=tr("default to main"))
+        self.branch_input.setAcceptDrops(False)
         lay_git.addWidget(self.branch_input, 1, 1)
         self.install_git = XPushButton(tr('Install'), variant=XButtonVariant.FILLED)
         self.install_git.clicked.connect(self.install_git_script)

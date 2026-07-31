@@ -108,7 +108,7 @@ class InstallScript(QObject):
             # 3. 移动到最终目录（同盘 rename）
             final_dir = BmTools.get_root_path() / 'BmScripts' / script_id
             if final_dir.exists():
-                shutil.rmtree(final_dir, ignore_errors=True)
+                BmTools.remove_dir(final_dir)
             shutil.copytree(temp_dir, final_dir, dirs_exist_ok=True)
             for _ in range(5):
                 try:
@@ -136,7 +136,7 @@ class InstallScript(QObject):
 
         finally:
             if temp_dir and Path(temp_dir).exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                BmTools.remove_dir(temp_dir)
                 BM_LOG.info(f"已清理临时目录: {temp_dir}")
 
     def install_from_local(self, script_zip_path: str):
@@ -327,8 +327,10 @@ class InstallScript(QObject):
                 # 释放可能的文件占用（可选）
                 import gc;
                 gc.collect()
-                shutil.rmtree(resources["target_dir"], ignore_errors=True)
-                BM_LOG.info(f"已清理残留目录: {resources['target_dir']}")
+                if BmTools.remove_dir(resources["target_dir"]):
+                    BM_LOG.info(f"已清理残留目录: {resources['target_dir']}")
+                else:
+                    BM_LOG.warning(f"残留目录无法立即删除（已进启动清理队列）: {resources['target_dir']}")
 
             self._emit_progress("残留资源清理完毕")
 
@@ -336,12 +338,26 @@ class InstallScript(QObject):
             BM_LOG.critical(f"回滚过程中发生二次错误: {rollback_err}")
 
     def _prepare_directory(self, script_id: str) -> Path:
-        """创建安装目标目录"""
+        """创建安装目标目录（自动清理上此残余）"""
         try:
-            # 建议将基础路径提取为配置常量
             base_dir = BmTools.get_root_path() / 'BmScripts'
             script_dir = base_dir / script_id
             script_dir.mkdir(parents=True, exist_ok=True)
+
+            # 目录有文件但无配置文件 → 上此残余，清理后重新安装
+            if any(script_dir.iterdir()) and not (script_dir / 'bm-scripts-box-rc.toml').exists():
+                BM_LOG.info(f"检测到残余目录，清理后重新安装: {script_dir}")
+                self._emit_progress("检测到上此残留数据，正在清理...")
+                BmTools.remove_dir(script_dir)
+                # 后台可能还在删（如卸载线程），等几秒重试
+                if script_dir.exists():
+                    for wait in [1, 2]:
+                        time.sleep(wait)
+                        BmTools.remove_dir(script_dir)
+                        if not script_dir.exists():
+                            break
+                script_dir.mkdir(parents=True, exist_ok=True)
+
             self._emit_progress("初始化脚本目录完成")
             return script_dir
         except Exception as e:

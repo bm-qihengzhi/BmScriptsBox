@@ -34,11 +34,20 @@ class MainView(XWidget):
         self.mouse_signals = None
         self.mouse_listener = None
         self.is_listening = False
+        self._tray_started = False  # 本次启动是否隐藏到托盘（窗口未显示过）
         self.presenter.start()
         self._setup_ui()
         QTimer.singleShot(0, self._init_stack_pages)
         self._init_presenter_signals()
 
+    def launch(self):
+        """启动入口：根据配置决定显示窗口还是进托盘"""
+        from app.data.database import ConfigDatabase
+        config = ConfigDatabase().get_all()
+        if config.get('start_to_tray', False):
+            self._tray_started = True
+        else:
+            self.show()
 
     def _setup_ui(self):
         """初始化界面"""
@@ -74,6 +83,8 @@ class MainView(XWidget):
                 self._qr_timer.stop()
                 self._hide_qr_hover()
         return super().eventFilter(obj, event)
+
+
 
 
     def _create_qr_button(self):
@@ -177,8 +188,8 @@ class MainView(XWidget):
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.presenter.on_tray_activated)
         self.tray.show()
-
-        BmNotify().show_success_notify('不忙脚本盒子已启动在系统托盘', duration=3000, show_close=False)
+        if self._tray_started:
+            BmNotify().show_success_notify('不忙脚本盒子已启动在系统托盘', duration=3000, show_close=False)
 
 
 
@@ -324,7 +335,7 @@ class MainView(XWidget):
 
     def _on_show_update(self, data: dict):
         """显示更新（信号入口，托盘模式时延后）"""
-        if getattr(self, '_tray_started', False):
+        if self._tray_started:
             self._pending_update = data
             return
         self._do_show_update(data)
@@ -357,6 +368,8 @@ class MainView(XWidget):
         from app.servers.scripts import ScriptRunner
         ScriptRunner.terminate_all()
         QApplication.quit()
+
+
 
 
 class QrDialog(XDialog):

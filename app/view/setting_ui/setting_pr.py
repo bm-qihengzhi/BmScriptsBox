@@ -13,7 +13,6 @@ from pathlib import Path
 
 from PySide2.QtCore import QThread, Signal, QTimer
 
-
 from xsideui import XLoadingMask, XNotif, XI18N, theme_manager
 
 from app.data import ScriptDatabase, ProjectGlobal, ConfigDatabase, TaskDatabase
@@ -22,15 +21,14 @@ from app.servers.monitor import get_double_monitor
 from app.servers.packages import PackagesManager
 
 
-
 class SettingPresenter:
     """软件设置"""
+
     def __init__(self, view):
         self.config_work = None
         self.view = view
         self.db = None
         self.get_config_work()
-
 
     def get_config_work(self):
         """
@@ -47,7 +45,6 @@ class SettingPresenter:
         else:
             XI18N.set_language('en_US')
 
-
         language = XI18N.current_lang
         ProjectGlobal.LANGUAGE = language
         config_path = BmTools.get_resources_path() / 'configs.json'
@@ -60,13 +57,11 @@ class SettingPresenter:
                 json_data = json.load(json_file)
                 json_data['LANGUAGE'] = language
 
-                # 将修改后的数据写回文件
                 with open(str(config_path), 'w', encoding='utf-8') as json_file:
                     json.dump(json_data, json_file, indent=2, ensure_ascii=False)
 
         except Exception as e:
             BmNotify().show_error_notify('save language failed')
-
 
     def update_theme(self, index):
         """明暗切换"""
@@ -75,15 +70,12 @@ class SettingPresenter:
         else:
             theme_manager.set_theme('dark')
 
-
-
     def update_hotkey(self, index):
         hotkey = self.view.hotkey_combo.currentText()
         ConfigDatabase.update_item('shortcut_key_rouse', [hotkey.lower()])
-        # 热更新
         get_double_monitor().update_configs(new_keys=[hotkey])
 
-    def update_setting(self, state,  name):
+    def update_setting(self, state, name):
         ConfigDatabase.update_item(name, state)
         ProjectGlobal.CONFIG = ConfigDatabase.get_all()
 
@@ -99,11 +91,10 @@ class SettingPresenter:
         """
         try:
             async_logger_manager.clear_log_content()
-            BmNotify().show_success_notify('日志已清空',in_window = True, position=XNotif.Pos.CENTER)
+            BmNotify().show_success_notify('日志已清空', in_window=True, position=XNotif.Pos.CENTER)
         except Exception as e:
             BM_LOG.error(f'清理日志失败:{e}')
-            BmNotify().show_error_notify('清理日志失败',in_window = True, position=XNotif.Pos.CENTER)
-
+            BmNotify().show_error_notify('清理日志失败', in_window=True, position=XNotif.Pos.CENTER)
 
     def clean_cache(self):
         """
@@ -123,15 +114,12 @@ class SettingPresenter:
             BM_LOG.error(f'清理缓存失败:{e}')
             BmNotify().show_error_notify('清理缓存失败', in_window=True, position=XNotif.Pos.CENTER)
 
-
-
     def add_to_startup(self, state):
         """添加到启动项"""
         if state:
             self._add_to_startup_registry()
         else:
             self._remove_from_startup_registry()
-
 
     def _add_to_startup_registry(self):
         """通过注册表添加到启动项"""
@@ -161,16 +149,12 @@ class SettingPresenter:
             return False
 
 
-
-
-
-
-
 class ReadConfigThread(QThread):
     """
     读取配置文件线程
     """
     finished = Signal(dict)
+
     def __init__(self):
         super().__init__()
         self.db = None
@@ -185,6 +169,7 @@ class ReadConfigThread(QThread):
 
 if __name__ == '__main__':
     from app.utils import BmTools
+
     log_path = BmTools.get_root_path() / 'BmLogs' / 'BmLogs.log'
     if log_path.exists():
         webbrowser.open(f"file://{log_path.absolute()}")

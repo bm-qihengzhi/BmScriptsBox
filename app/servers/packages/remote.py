@@ -9,6 +9,8 @@ from typing import Dict, Any
 
 import requests
 from app.data import ProjectGlobal
+from app.utils.proxy import get_sorted_proxies
+from app.utils.region import is_china
 
 
 class RemoteManifestProvider:
@@ -30,7 +32,7 @@ class RemoteManifestProvider:
         self.cache_ttl = cache_ttl
         self._session = requests.Session()
         self._session.trust_env = False
-        self._is_china = self._check_if_china()
+        self._is_china = is_china()
 
     def _get_random_headers(self) -> Dict[str, str]:
         """生成随机的请求头"""
@@ -39,17 +41,6 @@ class RemoteManifestProvider:
             "Accept": "application/json",
             "Cache-Control": "no-cache",  # 告诉服务器/CDN 我们想要最新的数据
         }
-
-    def _check_if_china(self) -> bool:
-        try:
-            response = self._session.get(
-                "http://ip-api.com/json/?fields=countryCode",
-                timeout=2)
-            if response.status_code == 200:
-                return response.json().get("countryCode") == "CN"
-        except Exception:
-            pass
-        return True
 
     def clear_cache(self):
         """手动清空所有缓存"""
@@ -75,12 +66,11 @@ class RemoteManifestProvider:
         base_url = ProjectGlobal.BM_BINARY_RESOURCE_UR.rstrip('/')
         url = f"{base_url}/{cache_key}.json"
 
-        # 构建请求队列：中国区 + GitHub 域名时优先走代理
+        # 构建请求队列：中国区 + GitHub 域名时优先走加速代理
         urls_to_try = []
         is_github = "github" in url.lower()
         if is_github and self._is_china:
-            for proxy in ProjectGlobal.PROXIES:
-                urls_to_try.append(f"{proxy.rstrip('/')}/{url}")
+            urls_to_try = get_sorted_proxies(url)
         urls_to_try.append(url)
 
         last_exception = None

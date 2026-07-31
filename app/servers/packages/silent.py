@@ -40,7 +40,7 @@ class SilentInstaller(QObject):
         self._cancelled = True
         self.status_signal.emit("cancelled")
 
-    def install_software(self, installer_path: str, install_dir: str, binary_name: str,
+    def install_software(self, installer_path: str, install_dir: str, binary_name: List[str],
                         silent_params: Optional[Dict[str, Any]] = None,
                         installer_type: Optional[str] = None,) -> tuple:
         """
@@ -294,16 +294,16 @@ class SilentInstaller(QObject):
         
         return results
 
-    def verify_installation(self, install_dir: str, binary_name: str = None) -> tuple:
+    def verify_installation(self, install_dir: str, binary_name: List[str] = None) -> tuple:
         """
         验证安装是否成功
 
         Args:
             install_dir: 安装目录
-            binary_name: 期望存在的可执行文件名
+            binary_name: 期望存在的可执行文件名列表
 
         Returns:
-            tuple: (是否成功, 可执行文件完整路径)
+            tuple: (是否成功, 第一个可执行文件完整路径)
         """
         install_path = Path(install_dir)
 
@@ -312,13 +312,16 @@ class SilentInstaller(QObject):
             return False, ""
 
         if binary_name:
-            full_path = install_path / binary_name
-            if not full_path.exists():
-                self.log_signal.emit(f"缺少文件: {full_path}")
-                return False, ""
-            else:
+            first_path = None
+            for name in binary_name:
+                full_path = install_path / name
+                if not full_path.exists():
+                    self.log_signal.emit(f"缺少文件: {full_path}")
+                    return False, ""
+                if first_path is None:
+                    first_path = str(full_path)
                 self.log_signal.emit(f"文件存在: {full_path}")
-                return True, str(full_path)
+            return True, first_path or ""
         else:
             self.log_signal.emit("缺少参数")
             return False, ''

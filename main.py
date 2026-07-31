@@ -72,15 +72,14 @@ def main():
     BmTools.set_language()
     app.setQuitOnLastWindowClosed(False)
 
-    # 6. 启动窗口
+    # 6. 后台清理上次残留目录
+    import threading
+    threading.Thread(target=BmTools.cleanup_pending_deletions, daemon=True).start()
+
+    # 7. 启动窗口
     global main_window
     main_window = MainView()
-    from app.data.database import ConfigDatabase
-    config = ConfigDatabase().get_all()
-    if not config.get('start_to_tray', False):
-        main_window.show()
-    else:
-        main_window._tray_started = True
+    main_window.launch()
     sys.exit(app.exec_())
 
 

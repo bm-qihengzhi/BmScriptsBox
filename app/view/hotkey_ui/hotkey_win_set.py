@@ -55,7 +55,7 @@ class HotkeySettingWidget(XDialog):
             key_name = event.name
             if event.event_type == kb.KEY_DOWN and hasattr(event, 'is_keypad') and event.is_keypad:
                 if key_name.isdigit():
-                    key_name = f'numpad_{key_name}'
+                    key_name = f'num_{key_name}'
 
             if modifiers:
                 combo = '+'.join(modifiers + [key_name])

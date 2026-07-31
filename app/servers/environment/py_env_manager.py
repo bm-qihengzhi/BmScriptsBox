@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 from PySide2.QtCore import QObject, Signal, QCoreApplication
 
-from app.utils import BM_LOG
+from app.utils import BM_LOG, BmTools
 from app.servers.packages import PackagesManager
 
 class PyEnvManager(QObject):
@@ -111,7 +111,7 @@ class PyEnvManager(QObject):
             cache_dir = cache_result.stdout.strip()
             builds_dir = Path(cache_dir) / 'builds-v0'
             if builds_dir.exists():
-                shutil.rmtree(builds_dir)
+                BmTools.remove_dir(builds_dir)
                 BM_LOG.info(f"已清理 uv 构建缓存: {builds_dir}")
         except Exception as e:
             BM_LOG.warning(f"清理 uv 构建缓存失败（不影响安装）: {e}")
@@ -368,8 +368,6 @@ class PyEnvManager(QObject):
         venv_path = Path(script_dir) / self.VENV_NAME
         if not venv_path.exists():
             return True, "无需清理"
-        try:
-            shutil.rmtree(venv_path)
+        if BmTools.remove_dir(venv_path):
             return True, "清理成功"
-        except Exception as e:
-            return False, f"清理失败: {e}"
+        return False, "清理失败: 文件被占用"
