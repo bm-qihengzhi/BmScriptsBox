@@ -1,10 +1,13 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import ctypes
 import importlib.util
+import webbrowser
+
 from PySide2.QtCore import QTimer, QObject, Signal, QPoint, QEvent, QPropertyAnimation, QEasingCurve
 from PySide2.QtGui import QIcon, Qt
 from PySide2.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QSystemTrayIcon, QFrame, QWidget, QVBoxLayout, \
@@ -57,6 +60,7 @@ class MainView(XWidget):
         self.resize(width, height)
         self.set_title(tr('BmScriptsBox'))
         self.hide_maximize_button()
+        self._create_donate()
         self._create_qr_button()
         self.set_logo(BmTools.get_logo_path())
 
@@ -89,7 +93,6 @@ class MainView(XWidget):
 
     def _create_qr_button(self):
         self.create_qr_button = XPushButton(variant=XButtonVariant.TEXT, icon=IconName.TWO_DIMENSIONAL_CODE, color=XColor.SECONDARY, size=XSize.SMALL)
-
         self._qr_dialog = QrDialog(self)
         self._qr_timer = QTimer(self)
         self._qr_timer.setSingleShot(True)
@@ -99,6 +102,13 @@ class MainView(XWidget):
         self._qr_dialog.installEventFilter(self)
 
         self.add_title_bar_widget(self.create_qr_button)
+
+    def _create_donate(self):
+        self.donate_button = XPushButton(variant=XButtonVariant.TEXT, text='捐赠',
+                                            color=XColor.SECONDARY, size=XSize.SMALL)
+        self.donate_button.clicked.connect(lambda: webbrowser.open_new_tab('https://www.bm-box.cn/donate'))
+        self.add_title_bar_widget(self.donate_button)
+
 
     def _show_qr_hover(self):
         self._qr_dialog.show()

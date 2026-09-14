@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import webbrowser
 import json
@@ -73,7 +74,7 @@ class AboutWidget(QWidget):
         layout.addWidget(XLabel('本软件已开源，欢迎 Star & PR').set_color(
                 XColor.TERTIARY), alignment=Qt.AlignCenter)
         layout.addWidget(
-            XLabel('基于 AGPL-3.0 许可证发布 | © 2026 瞎忙软件开发工作室', style=XLabel.Style.BODY).set_color(
+            XLabel('基于 MIT + Commons Clause 许可证发布 | © 2026 瞎忙软件开发工作室', style=XLabel.Style.BODY).set_color(
                 XColor.TERTIARY),
             alignment=Qt.AlignCenter)
         layout.addStretch()

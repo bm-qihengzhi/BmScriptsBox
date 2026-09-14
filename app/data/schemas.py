@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
@@ -31,7 +32,11 @@ class ScriptEntity(BaseModel):
     # --- 3. IO 契约 ---
     inputs_schema: List[Dict[str, Any]] = Field(default_factory=list)
     outputs_schema: List[Dict[str, Any]] = Field(default_factory=list)
+    params_schema: List[Dict[str, Any]] = Field(default_factory=list)
     workflow_enabled: bool = True
+    is_node: bool = False  # 可作为节点被联动调用
+    schedule_enabled: bool = False  # 声明可被定时任务调度 ([bmscriptsbox.schedule])
+    params_form_enabled: bool = False  # 声明：交互式运行时盒子生成参数表单 ([bmscriptsbox.params_form])
 
     # --- 4. 触发器配置 (原始 JSON 存储) ---
     triggers_schema: Dict[str, Any] = Field(default_factory=dict)

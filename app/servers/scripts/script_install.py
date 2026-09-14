@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
 import shutil
@@ -16,6 +17,7 @@ from PySide2.QtCore import Signal, QObject, QCoreApplication
 
 from app.data import ScriptDatabase
 from app.utils import BmTools, BM_LOG
+from app.cloud.api import UserApi
 from app.servers.context import ContextManager
 from app.servers.packages import PackagesManager
 from app.servers.environment import TomlManager, GitManager, PyEnvManager, NodeEnvManager, AhkEnvManager
@@ -33,6 +35,7 @@ class InstallScript(QObject):
     """
     负责协调解压、环境部署、数据库持久化及菜单注册的完整流程
     """
+    MAX_DEPTH = 5  # 脚本依赖链最大深度
     progress_signal = Signal(dict)  # 过程进度反馈
     finished_signal = Signal(dict)  # 最终结果通知
 
@@ -42,10 +45,17 @@ class InstallScript(QObject):
         self.py_deploy = PyEnvManager()
         self.node_deploy = NodeEnvManager()
         self.ahk_deploy = AhkEnvManager()
+        # 依赖安装栈：记录正在安装的脚本 id，用于循环检测 + 深度限制
+        self._installing_deps: set = set()
 
     # --- 主入口 ---
 
-    def install_from_cloud(self, script_id: str, script_git_url: str, branch:str='main'):
+    def install_from_cloud(self, script_id: str, script_git_url: str, branch:str='main',
+                           notify: bool = True):
+        """
+        从云仓库安装脚本。
+        notify=False 表示作为依赖被递归安装：不发射完成信号，失败时向父级抛异常。
+        """
         start_time = time.time()
         installed_resources = {
             "target_dir": False,  # 物理目录
@@ -53,6 +63,11 @@ class InstallScript(QObject):
             "context_menu": False  # 右键菜单
         }
         try:
+            # 依赖循环检测
+            if script_id in self._installing_deps:
+                raise RuntimeError(f"脚本依赖存在循环: {script_id}")
+            self._installing_deps.add(script_id)
+
             # 1:创建目录
             install_target_dir = self._prepare_directory(script_id)
             installed_resources["target_dir"] = install_target_dir
@@ -81,13 +96,22 @@ class InstallScript(QObject):
             installed_resources["db_entry"] = True  # 标记 DB 已写入
             installed_resources["context_menu"] = True  # 标记菜单已注册
 
-            # 6. 完成通知
-            cost = time.time() - start_time
-            self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
+            # 7. 先装本体，再装依赖（依赖关系要读完 toml 才知道）
+            self._install_script_dependencies(config)
+
+            # 8. 完成通知
+            if notify:
+                cost = time.time() - start_time
+                self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
         except Exception as e:
             BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()}")
             self._perform_rollback(installed_resources, script_id if 'script_id' in locals() else None)
-            self._notify_finished(False, self._format_friendly_error(e))
+            if notify:
+                self._notify_finished(False, self._format_friendly_error(e))
+            else:
+                raise  # 依赖安装失败，向父级传播以便父级回滚自身
+        finally:
+            self._installing_deps.discard(script_id)
 
 
     def install_from_git(self, script_git_url: str, branch: str = 'main'):
@@ -119,12 +143,13 @@ class InstallScript(QObject):
             temp_dir = None
             installed_resources["target_dir"] = final_dir
 
-            # 4~6. 部署 + 注册 + 完成
+            # 4~6. 部署 + 注册 + 依赖 + 完成
             config = self._load_config(final_dir)
             self._deploy_runtime(final_dir, config)
             self._register_system(config, '本地')
             installed_resources["db_entry"] = True
             installed_resources["context_menu"] = True
+            self._install_script_dependencies(config)
 
             cost = time.time() - start_time
             self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
@@ -166,7 +191,10 @@ class InstallScript(QObject):
             installed_resources["db_entry"] = True  # 标记 DB 已写入
             installed_resources["context_menu"] = True  # 标记菜单已注册
 
-            # 6. 完成通知
+            # 6. 先装本体，再装依赖（依赖关系要读完 toml 才知道）
+            self._install_script_dependencies(config)
+
+            # 7. 完成通知
             cost = time.time() - start_time
             self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
 
@@ -175,12 +203,49 @@ class InstallScript(QObject):
             self._perform_rollback(installed_resources, script_id if 'script_id' in locals() else None)
             self._notify_finished(False, self._format_friendly_error(e))
 
+    # --- 脚本依赖 ---
+    def _install_script_dependencies(self, config):
+        """先装本体再装依赖：逐个检查依赖脚本，缺失则解析来源并递归安装"""
+        for dep in config.dependencies or []:
+            self._install_single_dependency(config, dep.id)
+
+    def _install_single_dependency(self, config, did: str):
+        if len(self._installing_deps) >= self.MAX_DEPTH:
+            raise RuntimeError(f"脚本依赖链过深（>{self.MAX_DEPTH} 层），请检查依赖声明")
+        if ScriptDatabase.get_script_by_id(did):
+            self._emit_progress(f"依赖脚本 {did} 已安装，跳过")
+            return
+        who = config.info.name or str(config.info.id)
+        self._emit_progress(f"{who} 脚本需要依赖 {did}，正在安装 ...")
+        url, branch = self._resolve_dep_source(did)  # 未发布/解析失败 → raise
+        self.install_from_cloud(did, url, branch, notify=False)  # 递归；依赖自身依赖继续展开
+        self._emit_progress(f"依赖脚本 {did} 安装完成")
+
+    def _resolve_dep_source(self, did: str) -> tuple:
+        """通过社区批量接口解析依赖脚本的仓库地址；未发布则抛错"""
+        resp = UserApi().get_scripts_version(script_ids=[did])
+        remote = ((resp or {}).get('data') or {}).get('data') or []
+        info = {}
+        if isinstance(remote, list):
+            # 批量接口返回列表，每项含 script_id / repository_url / default_branch
+            for item in remote:
+                if isinstance(item, dict) and item.get('script_id') == did:
+                    info = item
+                    break
+        elif isinstance(remote, dict):
+            info = remote.get(did) or {}
+        if not resp.get('success') or not info.get('repository_url'):
+            raise RuntimeError(f"缺少依赖脚本 {did}: 未在社区发布或解析失败")
+        return info['repository_url'], info.get('default_branch') or 'main'
+
     # --- 私有步骤拆解 ---
+    
     def _download_from_git(self, script_git_url: str, script_dir: Path, branch:str='main') -> bool:
         """从Git仓库下载"""
-        self._emit_progress("正在克隆脚本...")
+        self._emit_progress("开始下载脚本...")
         success = GitManager().download_script_from_git(script_git_url, str(script_dir), branch)
         if success:
+            self._emit_progress("脚本下载完成...")
             BM_LOG.info("Git仓库克隆成功")
         return success
 

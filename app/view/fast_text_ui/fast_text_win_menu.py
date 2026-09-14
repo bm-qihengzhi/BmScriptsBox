@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from pynput import mouse
 from PySide2.QtCore import Qt
@@ -12,6 +13,7 @@ from xsideui import XListWidget, XDialog, tr
 
 from app.data import ProjectGlobal, ScriptDatabase
 from app.utils import BmNotify, BmTools, ParameterManager
+from app.utils.parameter_generate import build_launch_env
 from app.works import ExecuteScriptWork
 from .fast_text_signal import MouseSignals
 
@@ -78,12 +80,26 @@ class FastTextMenu(XDialog):
         # 从数据库获取脚本的输入定义
         script_data = ScriptDatabase().get_script_by_id(script_id)
         inputs = script_data.inputs_schema
-        input_data = inputs[-1] if inputs else {}
+        input_data = inputs[0] if inputs else {}
+        params_defs = script_data.params_schema or []
 
-        # 用标准 JSON 参数文件传递
+        data_list = [self._clipboard_text]
+        params_overrides = {}
+        if getattr(script_data, 'params_form_enabled', False):
+            from app.view.script_ui.params_prompt import show_params_prompt
+            res = show_params_prompt(script_data, data_list, parent=self)
+            if res is None:  # 用户取消
+                self.hide_window()
+                return
+            data_list, params_overrides = res
+
+        # 用标准 JSON 参数文件传递（注入 params 默认值）
         json_path = ParameterManager().construct_parameters(
             script_input_data=input_data,
-            data=[self._clipboard_text]
+            data=data_list,
+            params_defs=params_defs,
+            params_overrides=params_overrides,
+            env_extra=build_launch_env(script_id),
         )
 
 

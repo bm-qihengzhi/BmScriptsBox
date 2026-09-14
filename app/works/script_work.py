@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import time
 from pathlib import Path
@@ -13,6 +14,7 @@ from app.data.database import TaskDatabase
 from app.utils import BM_LOG, ParameterManager, BmTools
 from app.servers.context import ContextManager
 from app.servers.scripts import ScriptRunner, InstallScript
+from app.utils.parameter_generate import build_launch_env
 from app.servers.monitor import HotkeyManager
 from app.servers.explorer import COMManager, SelectedFilesInExplorer, SelectedFolderInExplorer, \
     SelectedFilesAndFolderInExplorer, FileExplorerManager
@@ -201,6 +203,8 @@ class ExecuteScriptFromHotkeyWork(QThread):
         try:
             self.execute_script_signal.emit({'status': True, 'message': '正在准备参数...'})
             json_path = self._prepare_params_file()
+            if json_path is None:  # 参数表单被取消
+                return
             ScriptRunner().run_script(self.script_id, str(json_path))
         except Exception as e:
             BM_LOG.error(f"执行失败: {e}")
@@ -214,15 +218,30 @@ class ExecuteScriptFromHotkeyWork(QThread):
         """获取资源路径并写入临时文件"""
         script_data = ScriptDatabase().get_script_by_id(self.script_id)
         inputs = script_data.inputs_schema
-        input_data = inputs[-1] if inputs else {}
+        input_data = inputs[0] if inputs else {}
         shortcut_config = script_data.triggers_schema.get('shortcut', {})
         input_type = shortcut_config.get('input_type') or ''
         filters = shortcut_config.get('filters') or []
 
         # 获取路径列表
         paths = self._get_resource_paths(input_type, filters)
-        # 构造参数 JSON
-        result = ParameterManager().construct_parameters(input_data, paths)
+        params_overrides = {}
+        if getattr(script_data, 'params_form_enabled', False):
+            from app.view.script_ui.params_prompt import show_params_prompt
+            res = show_params_prompt(script_data, paths)
+            if res is None:  # 用户取消 → 不启动
+                return None
+            paths, params_overrides = res
+
+        # 构造参数 JSON（注入 params 默认值，使本脚本可作为联动发起方）
+        params_defs = script_data.params_schema or []
+        env_extra = build_launch_env(self.script_id)
+        result = ParameterManager().construct_parameters(
+            input_data, paths,
+            params_defs=params_defs,
+            params_overrides=params_overrides,
+            env_extra=env_extra,
+        )
         return str(result) if result else ""
 
     def _get_resource_paths(self, input_type: str, filters: list) -> list:

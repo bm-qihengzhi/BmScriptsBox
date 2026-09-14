@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
 import toml
@@ -141,7 +142,16 @@ class TomlManager:
             "context_menu": "右键菜单",
             "shortcut": "快捷键",
             "inputs": "输入参数",
-            "outputs": "输出参数"
+            "outputs": "输出参数",
+            "params": "运行参数",
+            "type": "参数类型",
+            "default": "默认值",
+            "required": "是否必填",
+            "choices": "可选值列表",
+            "description": "参数描述",
+            "secret": "是否敏感参数",
+            "node": "可作为节点",
+            "enabled": "是否启用"
         }
 
         try:

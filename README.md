@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License">
+  <img src="https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-blue" alt="License">
   <img src="https://img.shields.io/badge/python-≥3.8-orange" alt="Python">
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
@@ -29,94 +29,84 @@
 
 ## 简介
 
-**不忙脚本盒子** 是一款 Windows 跨语言的桌面脚本管理工具，主打**零配置、全场景、易上手、高稳定**，内置了办公、图像、音视频、系统、AI 等各类常用场景的优质脚本，支持多语言脚本一键部署、自动化调度、全局快捷调用，全方位满足日常办公、批量处理、自定义自动化需求。核心功能特性如下：
+不忙脚本盒子是一款 Windows 端跨语言桌面脚本管理工具，主打**零配置、零命令行、开箱即用**
+
+无需编程基础，就可以像管理手机 App 一样，可视化安装各类脚本。平台内置办公、图像、音视频、系统、AI 等多场景脚本资源，支持一键部署、定时自动执行、全局快捷键快速唤起，轻松实现批量处理、日常办公、个性化自动化，满足各类效率需求
+
+
 
 ---
 
-## 功能特性
-### 🚀 零门槛上手
-> 不用配置、不用学习，打开就能用，轻松实现自动化
-* **开箱即用**：图形界面操作，脚本一键安装、一键运行，零基础也能快速上手。
-* **优质脚本库**：内置办公、文件、运维等常用脚本，支持搜索，一键部署。
-* **声明式接入**：只需一个TOML配置文件即可接入自定义脚本，灵活又省事。
+## 面向普通用户
 
-### ⚡ 多模式高效触发
-> 想怎么启动就怎么启动，省去手动操作，一键唤起脚本。
-* **全局快捷键**：自定义热键，随时随地一键启动，自动传入选中文件路径。
-* **右键联动**：在文件或文件夹上右键，直接运行脚本，自动携带路径参数。
-* **复制唤起**：按 Ctrl+C+C，自动读取剪贴板内容作为参数，文本处理超方便。
-* **定时任务**：支持一次性或每天/每周/每月循环，无人值守自动执行。
+零命令行、零基础上手，所有脚本可视化操作，轻量化、高效率，大幅降低工具使用门槛。
 
-### 🛠️ 多语言适配
-> 兼容各类编程语言，自动处理环境问题，让脚本运行更稳定、无冲突。
-* **语言全覆盖**：支持 Python、JS、PowerShell、Bat、AHK、EXE、HTML 等，满足多样场景
-* **智能依赖托管**：自动识别、下载和清理依赖，无需人工维护。
-* **独立运行环境**：每个脚本独享虚拟环境，互不干扰，杜绝版本冲突。
+- **免费无限制**
+  完全开源免费，无功能阉割、无使用限制，不限脚本安装数量，可随心拓展各类实用工具。
 
-### 💾 资源高效利用
-> 通过共享与加速机制，减少重复下载，节省存储空间，提升运行效率。。
-* **依赖全局共享**：Python、Node.js 依赖硬连接，多脚本共用，避免重复存储，加载更快。
-* **工具统一复用**：FFmpeg、Pandoc 等命令行工具全局复用，减少冗余。
-* **AI 模型共享**：huggingface、modelscope 等模型一次下载，多脚本共用。
-* **自动匹配版本**：自动识别脚本适配版本，精准匹配最优运行环境，无需手动切换配置。
-* **GitHub加速下载**：优化海外资源下载，解决下载慢、中断、失败问题，提升部署效率。
+- **可视化操作**
+  脚本安装、启动、管理、卸载全可视化一键操作，体验如同管理手机APP，零基础用户也能轻松上手，无需专业知识。
 
+- **极速便捷唤醒**
+  支持鼠标中键单击、双击 Ctrl 快捷键两种唤醒方式，随时随地秒开脚本面板，无需查找桌面图标、文件夹，操作高效省心。
 
-## 界面预览
+- **内置脚本社区**
+  内嵌官方脚本社区，支持一键检索、一键安装优质脚本，已安装脚本自动检测、更新，无需手动维护升级。
 
-<div style="display: flex; gap: 10px; justify-content: center;">
-  <img src="docs/images/ui-1.png" width="30%" alt="主窗口截图">
-  <img src="docs/images/ui-2.png" width="30%" alt="主窗口截图">
-  <img src="docs/images/ui-3.png" width="30%" alt="主窗口截图">
-</div>
-<br>
-<div style="display: flex; gap: 10px; justify-content: center;">
-  <img src="docs/images/ui-4.png" width="30%" alt="主窗口截图">
-  <img src="docs/images/ui-5.png" width="30%" alt="主窗口截图">
-  <img src="docs/images/ui-6.png" width="30%" alt="主窗口截图">
-</div>
-<br>
-<div style="display: flex; gap: 10px; justify-content: center;">
-  <img src="docs/images/ui-7.png" width="30%" alt="主窗口截图">
-  <img src="docs/images/ui-8.png" width="30%" alt="主窗口截图">
-  <img src="docs/images/ui-9.png" width="30%" alt="主窗口截图">
-</div>
+- **纯图形化启动**
+  全程脱离命令行，点击盒子内脚本卡片即可一键启动，彻底告别繁琐的终端输入操作，便捷性拉满。
 
-### 操作演示
+- **系统右键启动**
+  支持脚本挂载至系统右键菜单，选中文件、文件夹即可右键启动，自动带入文件路径参数，无需手动输入配置。
 
-> 提供脚本安装与多类触发运行方式的动画演示，脚本触发逻辑由脚本作者进行声明配置，并在软件专属界面可视化展示；用户日常操作场景下，几乎无需唤起不忙脚本盒子主程序窗口
+- **自定义全局热键**
+  可为任意脚本绑定专属全局快捷键，全程无需挪动鼠标、离开键盘，一键快速触发脚本运行。
 
+- **超级复制传参**
+  选中任意文字，连按两次 Ctrl\+C，自动将剪贴板内容作为参数传入脚本，省去手动复制、粘贴、输入参数的繁琐步骤。
 
+- **无人值守定时任务**
+  支持灵活的定时规则配置，涵盖一次性执行、每日、每周、每月循环执行，设置完成后自动运行，无需人工值守操作。
 
-<p align="center">
-  <img src="docs/images/install-gif.gif" width="50%" alt="安装脚本动画演示">
-  <br>
-  <em>安装脚本动画演示</em>
-</p>
+## 面向脚本开发者
 
-<p align="center">
-  <img src="docs/images/content-gif.gif" width="50%" alt="右键执行脚本">
-  <br>
-  <em>右键执行脚本动画演示</em>
-</p>
+脚本接入盒子仅需一份 TOML 声明，零侵入改造，让命令行脚本降低使用门槛，普通人也能轻松上手。[详细脚本开发文档](https://bm-box.cn/help/api)
 
-<p align="center">
-  <img src="docs/images/kuaijiejian.gif" width="50%" alt="快捷键执行脚本">
-  <br>
-  <em>快捷键执行脚本动画演示</em>
-</p>
+* **环境依赖自动配置**
+  
+  * 自动创建虚拟环境，一键完成环境与依赖安装，支持硬链接缓存共享
+  * FFmpeg、Pandoc 等工具，声明即可自动下载并注入环境变量，多脚本共用一份资源
+  * HuggingFace、ModelScope 模型按需拉取，跨脚本复用，减少重复下载
 
-<p align="center">
-  <img src="docs/images/chaojifuzhi.gif" width="50%" alt="超级复制执行脚本">
-  <br>
-  <em>超级复制执行脚本动画演示</em>
-</p>
+* **命令行脚本一键生成图形界面**
+  
+  * TOML 声明即可生成界面
+  * 无需学习 UI 框架、不用编写GUI代码，界面自动渲染
+  * 终端脚本秒变可视化工具，用户开箱即用，无需掌握命令行
 
-<p align="center">
-  <img src="docs/images/dingshi.gif" width="50%" alt="定时任务">
-  <br>
-  <em>定时任务演示</em>
-</p>
+* **定时任务，声明即调度**
+  
+  * 仅需配置声明，由盒子托管定时触发，到点自动执行脚本
+  * 参数配置自动映射到可视化面板，用户填好设置即可生效
+  * 开发者无需编写定时调度底层代码
+
+* **多场景脚本参数注入**
+  
+  * 支持右键菜单、全局快捷键、剪贴板、选中文件路径自动作为参数传入脚本
+  * 一份 JSON 三段契约，脚本只读，规则清清楚楚
+  * 结果有统一信封和预设错误码，返拿、判错都不用自己造
+
+* **脚本之间轻松协作调用**
+  
+  * 脚本可调用其他脚本，同步等待执行结果
+  * 内置友好 HTTP 调用接口，无需额外开发服务代码
+  * 声明依赖脚本，盒子自动安装
+
+* **从开发到分发，盒子全链路支持**
+  
+  * 三种安装源：本地 ZIP 包、GitHub 仓库、脚本社区
+  * 提交 GitHub 仓库地址，一键发布脚本至社区
+  * 配置 Webhook，GitHub 代码推送后，社区脚本自动更新
 
 ---
 
@@ -150,7 +140,7 @@ BmScriptsBox/
 │   └── works/                  # 工作线程
 ├── main.py                     # 应用入口
 ├── pyproject.toml              # Python 项目配置
-└── LICENSE                     # AGPL-3.0 许可证
+└── LICENSE                     # MIT + Commons Clause 许可证
 ```
 
 ### 核心技术栈
@@ -274,7 +264,7 @@ workflow_enabled = true
 
 ### 开源许可
 
-本项目基于 **GNU Affero General Public License v3 (AGPL-3.0)** 开源。
+本项目基于 **MIT License + Commons Clause** 开源
 
 ### 禁止商用
 

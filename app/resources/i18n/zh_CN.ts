@@ -948,5 +948,30 @@
         <source>Start to Tray</source>
         <translation>启动到托盘</translation>
     </message>
+    <message>
+        <location filename="view/scheduled_ui/scheduled_win_disp.py" line="101"/>
+        <source>Run History</source>
+        <translation>执行记录</translation>
+    </message>
+    <message>
+        <location filename="view/scheduled_ui/scheduled_win_disp.py" line="101"/>
+        <source>Time</source>
+        <translation>时间</translation>
+    </message>
+    <message>
+        <location filename="view/scheduled_ui/scheduled_win_disp.py" line="101"/>
+        <source>Code</source>
+        <translation>状态码</translation>
+    </message>
+    <message>
+        <location filename="view/scheduled_ui/scheduled_win_disp.py" line="101"/>
+        <source>Message</source>
+        <translation>信息</translation>
+    </message>
+    <message>
+        <location filename="view/scheduled_ui/scheduled_win_disp.py" line="101"/>
+        <source>Browse</source>
+        <translation>浏览</translation>
+    </message>
 </context>
 </TS>

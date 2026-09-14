@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from PySide2.QtCore import QTimer
 
@@ -56,6 +57,14 @@ class ScheduledPresenter:
     def get_task(self, db_id: int):
         """根据任务名称获取任务信息"""
         return TaskDatabase().get_task(db_id)
+
+    def get_task_runs(self, db_id: int):
+        """获取某任务的历史执行记录（新→旧）"""
+        return TaskDatabase().get_task_runs(db_id)
+
+    def get_latest_task_run(self, db_id: int):
+        """获取某任务最近一次执行记录"""
+        return TaskDatabase().get_latest_task_run(db_id)
 
     def delete_task(self, db_id: int):
         """删除定时任务"""

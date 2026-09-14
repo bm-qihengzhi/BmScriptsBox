@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
 import webbrowser
@@ -83,17 +84,40 @@ class ScriptPresenter(QObject):
             BmNotify().show_error_notify(content='卸载失败', in_window=True)
             return
 
-    def execute_script(self,script_id):
+    def execute_script(self, script_id):
         from app.data import ProjectGlobal, ScriptDatabase
+        entity = ScriptDatabase.get_script_by_id(script_id)
         with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
             if script_id in ProjectGlobal.RUNNING_SCRIPTS:
                 BM_LOG.warning(f"脚本 {script_id} 正在执行中，跳过重复触发")
-                entity = ScriptDatabase.get_script_by_id(script_id)
                 name = entity.name if entity else script_id
                 BmNotify().show_warning_notify(f"脚本「{name}」正在运行中，请等待完成")
                 return
         from app.works.script_work import ExecuteScriptWork
-        worker = ExecuteScriptWork(script_id)
+        from app.utils import ParameterManager
+        from app.utils.parameter_generate import build_launch_env
+
+        script_args = ''
+        if entity:
+            if getattr(entity, 'params_form_enabled', False):
+                from app.view.script_ui.params_prompt import show_params_prompt
+                res = show_params_prompt(entity, [])  # 卡片运行：无预填数据，用户自填
+                if res is None:  # 取消则不启动
+                    return
+                data_list, params_overrides = res
+                params_defs = entity.params_schema
+            else:
+                # 普通卡片运行：data、params 均为空，仅注入 environment（脚本可作联动发起方）
+                data_list, params_overrides, params_defs = [], {}, []
+            input_data = entity.inputs_schema[0] if entity.inputs_schema else {}
+            json_path = ParameterManager().construct_parameters(
+                input_data, data_list,
+                params_defs=params_defs,
+                params_overrides=params_overrides,
+                env_extra=build_launch_env(script_id),
+            )
+            script_args = str(json_path) if json_path else ''
+        worker = ExecuteScriptWork(script_id, script_args=script_args)
         worker.execute_signal.connect(self._on_executed)
         worker.finished.connect(lambda sid=script_id: self._execute_workers.pop(sid, None))
         self._execute_workers[script_id] = worker

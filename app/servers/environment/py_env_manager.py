@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import os
 import time
@@ -56,9 +57,14 @@ class PyEnvManager(QObject):
                 BM_LOG.info(f"脚本 {script_dir} 无第三方依赖，跳过环境创建")
                 return True
 
-            # 3. 创建虚拟环境
-            self._emit_progress("正在创建 Python 虚拟环境...")
-            self._exec_uv_venv(script_dir, venv_path, timeout)
+            # 3. 创建/复用虚拟环境
+            if venv_path.exists() and self._verify_venv(venv_path):
+                self._emit_progress("检测到已存在的虚拟环境，直接同步依赖...")
+            else:
+                if venv_path.exists():
+                    BM_LOG.warning(f"虚拟环境目录已存在但校验失败，重新创建: {venv_path}")
+                self._emit_progress("正在创建 Python 虚拟环境...")
+                self._exec_uv_venv(script_dir, venv_path, timeout)
 
             # 4. 验证并执行后续增强
             if self._verify_venv(venv_path):
@@ -123,6 +129,7 @@ class PyEnvManager(QObject):
         start_time = time.time()
         args = [
             'venv',
+            '--clear',
             '--python', str(self.python_path),
             '--system-site-packages',
             str(venv_path)
@@ -206,7 +213,7 @@ class PyEnvManager(QObject):
 
         # 3. 如果环境已存在，仅记录日志，不阻断流程
         if venv_path.exists():
-            BM_LOG.warning(f"虚拟环境目录已存在，将执行覆盖安装: {venv_path}")
+            BM_LOG.warning(f"虚拟环境目录已存在，将复用并重新同步依赖: {venv_path}")
 
     def _check_disk_space(self, target_path: str, min_mb: int) -> bool:
         """检查磁盘空间"""

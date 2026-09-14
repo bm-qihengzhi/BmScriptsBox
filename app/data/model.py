@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import atexit
 import json
@@ -47,7 +48,11 @@ class Script(BaseModel):
     # 存储为 JSON 字符串，包含 name, type, exts 等
     inputs_schema = TextField(null=True)
     outputs_schema = TextField(null=True)
+    params_schema = TextField(null=True)  # 脚本运行参数 ([[bmscriptsbox.params]])
     workflow_enabled = BooleanField(default=True)
+    is_node = BooleanField(default=False)  # 可作为节点被联动调用 ([bmscriptsbox.node])
+    schedule_enabled = BooleanField(default=False)  # 声明可被定时任务调度 ([bmscriptsbox.schedule])
+    params_form_enabled = BooleanField(default=False)  # 声明：交互式运行时盒子生成参数表单 ([bmscriptsbox.params_form])
 
     # --- 4. Triggers (触发器配置) ---
     triggers_schema = TextField(default="{}")
@@ -86,16 +91,21 @@ class Task(BaseModel):
     is_active = BooleanField(default=True)  # 是否启用
     task_parameter = TextField(null=True)
     task_parameter_type = CharField(default="")
+    task_params = TextField(null=True)  # 任务可配置的 params 覆盖（JSON 字符串）
 
-    # 固定间隔任务参数
-    interval_minutes = IntegerField(null=True)  # 间隔分钟数
+    # 执行次数上限（固定/随机间隔可用，None=不限次数）
+    max_run_count = IntegerField(null=True)  # 执行次数上限
+    executed_count = IntegerField(default=0)  # 已执行次数
+
+    # 固定间隔任务参数（列名沿用 *_minutes，值单位已统一为秒）
+    interval_minutes = IntegerField(null=True)  # 间隔秒数
 
     # 随机间隔任务参数
-    min_interval_minutes = IntegerField(null=True)  # 最小间隔分钟数
-    max_interval_minutes = IntegerField(null=True)  # 最大间隔分钟数
+    min_interval_minutes = IntegerField(null=True)  # 最小间隔秒数
+    max_interval_minutes = IntegerField(null=True)  # 最大间隔秒数
 
     # 倒计时任务参数
-    delay_minutes = IntegerField(null=True)  # 延迟分钟数
+    delay_minutes = IntegerField(null=True)  # 延迟秒数
 
     # 每日任务参数
     daily_time = CharField(null=True)  # 每日执行时间（格式: HH:MM）
@@ -111,18 +121,88 @@ class Task(BaseModel):
         table_name = "app_tasks"
 
 
+class TaskRun(BaseModel):
+    """定时任务历史执行记录（只记 code+msg，业务键不落库）"""
+    id = AutoField(primary_key=True)
+    task_id = IntegerField(index=True)   # 关联 app_tasks.task_id
+    script_id = CharField(null=True)     # 执行的脚本 ID
+    status = CharField(default='completed')  # success | failed | completed
+    code = IntegerField(null=True)       # 脚本回传信封的 code；脚本未写则 null
+    msg = TextField(null=True)           # 信封 msg（人话描述）
+    run_at = DateTimeField(default=datetime.now)  # 执行时间
+    duration_ms = IntegerField(null=True)         # 耗时（毫秒）
+
+    class Meta:
+        table_name = "app_task_runs"
+
+
+class ScriptParamMemory(BaseModel):
+    """脚本参数表单记忆：记住每次确认运行的 params 覆盖值，下次回填"""
+    script_id = CharField(primary_key=True)
+    params = TextField(default='{}')  # 上次确认的 params（JSON）
+    updated_at = DateTimeField(default=datetime.now)
+
+    class Meta:
+        table_name = "app_script_param_memory"
+
+
 _tables_initialized = False
 
 def ensure_tables():
     global _tables_initialized
     if _tables_initialized:
         return
-    db.create_tables([Script, Config, Task], safe=True)
+    db.create_tables([Script, Config, Task, TaskRun, ScriptParamMemory], safe=True)
     # 迁移：新增列（兼容已有数据库）
     try:
         db.execute_sql("ALTER TABLE app_config ADD COLUMN start_to_tray INTEGER NOT NULL DEFAULT 0")
     except Exception:
         pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_scripts ADD COLUMN params_schema TEXT")
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_scripts ADD COLUMN is_node INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_scripts ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_scripts ADD COLUMN params_form_enabled INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_tasks ADD COLUMN task_params TEXT")
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_tasks ADD COLUMN max_run_count INTEGER")
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_tasks ADD COLUMN executed_count INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
+    # 迁移 v2：间隔/随机间隔/倒计时单位由分钟改为秒（旧值 ×60），user_version 保证只执行一次
+    cur = db.execute_sql("PRAGMA user_version").fetchone()
+    if not cur or cur[0] < 2:
+        db.execute_sql(
+            "UPDATE app_tasks SET interval_minutes = interval_minutes * 60 "
+            "WHERE interval_minutes IS NOT NULL"
+        )
+        db.execute_sql(
+            "UPDATE app_tasks SET min_interval_minutes = min_interval_minutes * 60, "
+            "max_interval_minutes = max_interval_minutes * 60 "
+            "WHERE min_interval_minutes IS NOT NULL OR max_interval_minutes IS NOT NULL"
+        )
+        db.execute_sql(
+            "UPDATE app_tasks SET delay_minutes = delay_minutes * 60 "
+            "WHERE delay_minutes IS NOT NULL"
+        )
+        db.execute_sql("PRAGMA user_version = 2")
     if not Config.select().exists():
         Config.create(
             mouse_middle=True,

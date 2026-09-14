@@ -1,7 +1,8 @@
 """
 Copyright (c) 2026 綦恒智
 Email: bmscriptsbox@163.com
-SPDX-License-Identifier: AGPL-3.0
+SPDX-License-Identifier: MIT
+SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import logging
 import logging.handlers
@@ -12,7 +13,7 @@ from pathlib import Path
 
 
 class AsyncLoggerManager:
-    def __init__(self, log_level=logging.INFO):
+    def __init__(self, log_level=logging.ERROR):
         if getattr(sys, 'frozen', False):
             _root = Path(sys.executable).parent
         else:
