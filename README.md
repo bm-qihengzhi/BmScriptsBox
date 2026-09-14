@@ -1,7 +1,4 @@
-<p align="center">
-  <img src="docs/images/logo.svg" width="30%" alt="安装脚本动画演示">
-  <br>
-</p>
+
 
 <h1 align="center">不忙脚本盒子 / BmScriptsBox</h1>
 
