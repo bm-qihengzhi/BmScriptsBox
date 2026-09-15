@@ -8,9 +8,10 @@ import json
 from typing import Any, Dict
 
 from PySide2.QtCore import Qt
+from PySide2.QtGui import QCursor
 from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
 
-from xsideui import XCheckBox, XDoubleSpinBox, XSpinBox, XComboBox, XLineEdit, XTextEdit, XLabel
+from xsideui import XCheckBox, XDoubleSpinBox, XSpinBox, XComboBox, XLineEdit, XTextEdit, XLabel, XMenu
 
 
 def make_header_row(name: str, label: str, trailing=None) -> QWidget:
@@ -29,10 +30,23 @@ def make_header_row(name: str, label: str, trailing=None) -> QWidget:
 
 
 def browse_append_to_edit(parent: QWidget, edit: QWidget, pick: str, exts: list):
-    """打开原生文件/文件夹选择器，把所选路径追加成多行框新行（显式实例+显式模态+同步 exec_）"""
+    """打开原生文件/文件夹选择器，把所选路径追加成多行框新行（显式实例+显式模态+同步 exec_）
+    files→文件多选；folders→文件夹；both→先弹「选择文件…/选择文件夹…」菜单再开对应选择器。"""
+    if pick == 'both':
+        menu = XMenu(parent=parent)
+        act_file = menu.add_action("选择文件…")
+        act_folder = menu.add_action("选择文件夹…")
+        chosen = menu.exec_(QCursor.pos())
+        _open_dialog_and_append(parent, edit, folders=(chosen == act_folder), exts=exts)
+        return
+    _open_dialog_and_append(parent, edit, folders=(pick == 'folders'), exts=exts)
+
+
+def _open_dialog_and_append(parent: QWidget, edit: QWidget, folders: bool, exts: list):
+    """显式实例+显式模态+同步 exec_ 打开并追加路径；folders=True 只选文件夹"""
     dialog = QFileDialog(parent)
     dialog.setWindowModality(Qt.WindowModal)  # 显式模态，保证 Qt 焦点系统正常
-    if pick == 'folders':
+    if folders:
         dialog.setFileMode(QFileDialog.Directory)
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
     else:

@@ -100,7 +100,7 @@ class ScheduledSetWidget(XDialog):
 
         # ── 脚本 ──
         script_divider = XTextDivider(tr('Script Name'), align=Qt.AlignLeft)
-        self.task_name = XComboBox()
+        self.task_name = XComboBox(searchable=True)
         left_layout.addWidget(script_divider)
         left_layout.addWidget(self.task_name)
 

@@ -22,7 +22,6 @@ from app.view.params_ui import (build_param_widget, read_param_widget, write_par
 from app.utils.tools import BmTools
 
 
-
 class ParamsPromptDialog(XDialog):
     """按脚本 params_schema 自动生成参数设置表单（一行一参数，联动隐藏整行收起）"""
 
@@ -58,7 +57,6 @@ class ParamsPromptDialog(XDialog):
         help_btn.setToolTip(tr('查看脚本详情'))
         help_btn.clicked.connect(self._open_detail)
         if any(i.get('pick') for i in inputs):
-            self.setMinimumHeight(720)
             # 左右布局：左侧 XUpload（选中后切 textedit），右侧 参数/非 pick 输入
             hlay = QHBoxLayout(body)
             hlay.setContentsMargins(20, 20, 20, 11)
@@ -161,26 +159,26 @@ class ParamsPromptDialog(XDialog):
         name = inp.get('name', '')
         pick = inp.get('pick')
         ilabel = inp.get('label', '') or ''
-        mode_map = {'files': XUpload.MODE_FILES, 'folders': XUpload.MODE_FOLDERS,
-                    'both': XUpload.MODE_BOTH}
-        mode = mode_map.get(pick, XUpload.MODE_FILES)
 
         list_w = XListWidget(show_border=False)
         list_w.setMinimumHeight(180)
         self._inputs_widgets[name] = (list_w, 'list')
         self._pick_edit = list_w
         self._pick_text_row = list_w
-        # 右键菜单：上移 / 下移 / 删除
+        # 右键菜单：上移 / 下移 / 置顶 / 置底 / 删除 / 清空
         list_w.setContextMenuPolicy(Qt.CustomContextMenu)
         list_w.customContextMenuRequested.connect(self._show_pick_menu)
 
-        upload = XUpload(mode=mode, accept_types=inp.get('exts') or ['*'],
+        mode_map = {'files': XUpload.MODE_FILES, 'folders': XUpload.MODE_FOLDERS, 'both': XUpload.MODE_BOTH}
+        upload = XUpload(mode=mode_map.get(pick, XUpload.MODE_FILES),
+                         accept_types=inp.get('exts') or ['*'],
                          mini_height=180, show_border=False)
         upload.files_processed.connect(lambda paths, nm=name: self._on_pick_paths(nm, paths))
         self._pick_upload = upload
 
         content = QWidget()
-        content.setMinimumWidth(600)
+        content.setMinimumWidth(420)
+        content.setMinimumHeight(420)
         lay = QVBoxLayout(content)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
@@ -192,10 +190,16 @@ class ParamsPromptDialog(XDialog):
 
         reselect_btn = XPushButton(icon=IconName.REDO, variant=XButtonVariant.TEXT, size=XSize.SMALL)
         reselect_btn.setToolTip("重新选择")
-        reselect_btn.clicked.connect(lambda: self._show_pick_mode(True))
+        reselect_btn.clicked.connect(self._on_reselect_clicked)
         card.addWidget(reselect_btn, target=XHeaderCard.CardPosition.HEADER)
 
         return card
+
+    def _on_reselect_clicked(self):
+        """重新选择：清空当前列表，回到 XUpload 取件"""
+        if self._pick_edit is not None:
+            self._pick_edit.clear()
+        self._show_pick_mode(True)
 
     def _show_pick_mode(self, show_upload: bool):
         """True=显示 XUpload；False=显示 textedit（重新选择）"""
