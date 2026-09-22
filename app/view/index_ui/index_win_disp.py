@@ -12,8 +12,9 @@ from PySide2.QtCore import QTimer, QObject, Signal, QPoint, QEvent, QPropertyAni
 from PySide2.QtGui import QIcon, Qt
 from PySide2.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QSystemTrayIcon, QFrame, QWidget, QVBoxLayout, \
     QGraphicsOpacityEffect, QLabel
+from app.view.index_ui import custom_rc
 from xsideui import XMenu, XNavSimple, IconName, XIcon, XWidget, tr, XColor, XIconBadge, XPushButton, XButtonVariant, \
-    XSize, XImage, XDialog, XLabel
+    XSize, XImage, XDialog, XLabel, XIcon
 
 from app.utils import BmTools, BmNotify
 from app.view.index_ui.index_pr import MainPresenter
@@ -22,7 +23,7 @@ HAS_MARKET = importlib.util.find_spec('app.cloud.view.market_ui.market_win') is 
 HAS_USER = importlib.util.find_spec('app.cloud.view.user_win') is not None
 HAS_SCRIPT_UPDATE = importlib.util.find_spec('app.cloud.view.update_win') is not None
 
-
+XIcon.add_resource_path(':/custom/')
 class MouseSignals(QObject):
     click_outside = Signal()
 
@@ -60,6 +61,7 @@ class MainView(XWidget):
         self.resize(width, height)
         self.set_title(tr('BmScriptsBox'))
         self.hide_maximize_button()
+        self._create_custom()
         self._create_donate()
         self._create_qr_button()
         self.set_logo(BmTools.get_logo_path())
@@ -92,11 +94,12 @@ class MainView(XWidget):
 
 
     def _create_qr_button(self):
-        self.create_qr_button = XPushButton(variant=XButtonVariant.TEXT, icon=IconName.TWO_DIMENSIONAL_CODE, color=XColor.SECONDARY, size=XSize.SMALL)
+        self.create_qr_button = XPushButton(variant=XButtonVariant.TEXT, icon="custom_official", color=XColor.SECONDARY, size=XSize.SMALL)
         self._qr_dialog = QrDialog(self)
         self._qr_timer = QTimer(self)
         self._qr_timer.setSingleShot(True)
         self._qr_timer.timeout.connect(self._show_qr_hover)
+
 
         self.create_qr_button.installEventFilter(self)
         self._qr_dialog.installEventFilter(self)
@@ -104,10 +107,17 @@ class MainView(XWidget):
         self.add_title_bar_widget(self.create_qr_button)
 
     def _create_donate(self):
-        self.donate_button = XPushButton(variant=XButtonVariant.TEXT, text='捐赠',
+        self.donate_button = XPushButton(variant=XButtonVariant.TEXT,  icon="custom_donation",
                                             color=XColor.SECONDARY, size=XSize.SMALL)
+        self.donate_button.setToolTip("捐赠支持项目")
         self.donate_button.clicked.connect(lambda: webbrowser.open_new_tab('https://www.bm-box.cn/donate'))
         self.add_title_bar_widget(self.donate_button)
+
+    def _create_custom(self):
+        self.custom_button = XPushButton(variant=XButtonVariant.TEXT, icon="custom_post",color=XColor.SECONDARY, size=XSize.SMALL)
+        self.custom_button.setToolTip("脚本需求发布")
+        self.custom_button.clicked.connect(lambda: webbrowser.open_new_tab('https://www.bm-box.cn/feedback'))
+        self.add_title_bar_widget(self.custom_button)
 
 
     def _show_qr_hover(self):
@@ -398,4 +408,5 @@ class QrDialog(XDialog):
         qr_path = BmTools.get_resources_path() / 'imgs' / 'wechat_qr.jpg'
         img_label = XImage(source=str(qr_path),min_size=200)
         layout.addWidget(img_label)
-        layout.addWidget(XLabel('不忙官方公众号'), alignment=Qt.AlignCenter)
+        layout.addWidget(XLabel('不忙官方公众号').set_style(XLabel.Style.H4), alignment=Qt.AlignCenter)
+        layout.addWidget(XLabel('更新通知 / 社区交流 / 干货推送 ').set_font_size(12), alignment=Qt.AlignCenter)

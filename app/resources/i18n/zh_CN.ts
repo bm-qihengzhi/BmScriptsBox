@@ -125,8 +125,8 @@
     </message>
     <message>
         <location filename="cloud/view/market_ui/market_win.py" line="364"/>
-        <source>Search Script</source>
-        <translation>搜索脚本</translation>
+        <source>Search Script(name、id、keyword)</source>
+        <translation>搜索脚本(脚本名、脚本ID、关键词)</translation>
     </message>
     <message>
         <location filename="cloud/view/market_ui/market_win.py" line="447"/>
@@ -507,6 +507,11 @@
         <location filename="view/scheduled_ui/scheduled_win_set.py" line="63"/>
         <source>Script Params</source>
         <translation>脚本参数</translation>
+    </message>
+    <message>
+        <location filename="view/scheduled_ui/scheduled_win_set.py" line="63"/>
+        <source>Run data</source>
+        <translation>运行数据</translation>
     </message>
     <message>
         <location filename="view/scheduled_ui/scheduled_win_set.py" line="70"/>

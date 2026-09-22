@@ -114,7 +114,7 @@ class ParamsPromptDialog(XDialog):
                 rl = QHBoxLayout(row)
                 rl.setContentsMargins(0, 0, 0, 0)
                 rl.setSpacing(8)
-                rl.addWidget(label_cell, 0, Qt.AlignTop)
+                rl.addWidget(label_cell, 0, Qt.AlignVCenter)
                 rl.addWidget(wg, 1)
                 form_box.addWidget(row)
                 # row 让联动隐藏时整行收起（QFormLayout 会留空行，VBox 行容器不会）

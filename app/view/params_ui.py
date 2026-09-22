@@ -184,7 +184,6 @@ def make_label_cell(name: str, label: str, required: bool) -> QWidget:
     main.setWordWrap(True)
     lay.addWidget(main)
 
-    lay.addStretch()
     return cell
 
 
@@ -243,6 +242,8 @@ def build_param_widget(pd: Dict) -> QWidget:
         return w
 
     w = XLineEdit(placeholder=desc, show_password=bool(secret))
+    if desc:
+        w.setToolTip(desc)  # 悬停显示完整描述（placeholder 输入后会截断）
     if default is not None:
         w.setText(str(default))
     return w

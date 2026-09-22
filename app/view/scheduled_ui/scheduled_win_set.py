@@ -73,6 +73,7 @@ class ScheduledSetWidget(XDialog):
         self._param_inputs: Dict[str, ParamField] = {}
         self._param_override_widgets: Dict[str, ParamField] = {}
         self._rebuild_timer = None
+        self._run_data_divider = None
 
         self._setup_ui()
         self._connect_signals()
@@ -92,23 +93,24 @@ class ScheduledSetWidget(XDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(11)
 
-        left_layout = QVBoxLayout()
+        self.left_layout = QVBoxLayout()
         right_layout = QVBoxLayout()
-        layout.addLayout(left_layout, stretch=1)
+        layout.addLayout(self.left_layout, stretch=1)
         layout.addWidget(XDivider(vertical=True))
         layout.addLayout(right_layout, stretch=1)
 
         # ── 脚本 ──
         script_divider = XTextDivider(tr('Script Name'), align=Qt.AlignLeft)
         self.task_name = XComboBox(searchable=True)
-        left_layout.addWidget(script_divider)
-        left_layout.addWidget(self.task_name)
+        self.left_layout.addWidget(script_divider)
+        self.left_layout.addWidget(self.task_name)
 
-        # ── 参数 ──
-        left_layout.addWidget(XTextDivider(tr('Script Params'), align=Qt.AlignLeft))
+        # ── 运行数据 ──
+        self._run_data_divider = XTextDivider(tr('Run data'), align=Qt.AlignLeft)
+        self.left_layout.addWidget(self._run_data_divider)
         self.param_stacked = QStackedWidget()
-        left_layout.addWidget(self.param_stacked)
-        left_layout.addStretch()
+        self.left_layout.addWidget(self.param_stacked)
+        self.left_layout.addStretch()
 
         # ── 时间设置 ──
         self._setup_time_settings(right_layout)
@@ -274,17 +276,20 @@ class ScheduledSetWidget(XDialog):
         layout.setSpacing(6)
 
         # 3. 构建 inputs 区域
+        has_inputs = any(i.get('name') and i.get('type') for i in (inputs_schema or []))
+        if self._run_data_divider is not None:
+            self._run_data_divider.setVisible(has_inputs)  # 无输入数据时不显示 "Run data" 分割线
         inputs_widget = self._build_inputs_ui(inputs_schema)
         layout.addWidget(inputs_widget)
 
         # 4. 构建 params 区域
         if params_schema:
-            layout.addWidget(XTextDivider('运行参数', align=Qt.AlignLeft))
+            layout.addWidget(XTextDivider(tr('Script Params'), align=Qt.AlignLeft))
             params_widget = self._build_params_ui(params_schema)
             layout.addWidget(params_widget)
 
-        # # 5. 添加弹性空间
-        # layout.addStretch()
+        # 5. 添加弹性空间
+        layout.addStretch()
 
         # 6. 判断是否需要滚动
         self._param_widget = self._wrap_with_scroll(container, inputs_schema, params_schema)
@@ -356,7 +361,7 @@ class ScheduledSetWidget(XDialog):
         form = QFormLayout(widget)
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(6)
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         for param in params_schema:

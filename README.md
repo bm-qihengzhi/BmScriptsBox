@@ -28,7 +28,7 @@
 
 不忙脚本盒子是一款 Windows 端跨语言桌面脚本管理工具，主打**零配置、零命令行、开箱即用**
 
-无需编程基础，就可以像管理手机 App 一样，可视化安装各类脚本。软件内置脚本库、包含办公、图像、音视频、系统、AI 等多场景脚本资源，支持一键部署、定时自动执行、全局快捷键快速唤起，轻松实现批量处理、日常办公、个性化自动化，满足各类效率效率
+无需编程基础，就可以像管理手机 App 一样，可视化安装各类脚本。软件内置脚本库、包含办公、图像、音视频、系统、AI 等多场景脚本资源，支持一键部署、定时自动执行、全局快捷键快速唤起，轻松实现批量处理、日常办公、个性化自动化，满足各类效率需求。
 
 ---
 
@@ -160,13 +160,13 @@ BmScriptsBox/
 
 ### 方式一：下载安装包
 
-从 [GitHub Releases](https://github.com/bmscriptsbox/BmScriptsBox/releases) 下载最新的安装包，双击安装即可。
+从 [GitHub Releases](https://github.com/bm-qihengzhi/BmScriptsBox/releases) 下载最新的安装包，双击安装即可。
 
 ### 方式二：从源码运行
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/bmscriptsbox/BmScriptsBox.git
+git clone https://github.com/bm-qihengzhi/BmScriptsBox.git
 cd BmScriptsBox
 
 # 2. 确保 Python ≥ 3.8
