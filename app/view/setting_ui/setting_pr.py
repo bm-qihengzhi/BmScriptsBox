@@ -122,6 +122,15 @@ class SettingPresenter:
         else:
             self._remove_from_startup_registry()
 
+    def _get_startup_exe(self) -> Path:
+        """获取自启用 exe，优先使用无控制台版本（避免开机闪黑框）"""
+        exe_path = Path(sys.executable)
+        if not getattr(sys, 'frozen', False) and exe_path.name.lower() == 'bmscriptsbox.exe':
+            win_exe = exe_path.with_name('BmScriptsBoxw.exe')
+            if win_exe.exists():
+                return win_exe
+        return exe_path
+
     def _add_to_startup_registry(self):
         """通过注册表添加到启动项"""
         try:
@@ -129,11 +138,18 @@ class SettingPresenter:
             subkey = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
             with winreg.OpenKey(key, subkey, 0, winreg.KEY_SET_VALUE) as reg_key:
-                exe_path = Path(sys.executable)
-                winreg.SetValueEx(reg_key, "BmScriptsBox", 0, winreg.REG_SZ, f'"{exe_path}"')
+                exe_path = self._get_startup_exe()
+                # PyInstaller 打包后 exe 自带入口；源码/嵌入式运行需带 main.py 参数
+                if getattr(sys, 'frozen', False):
+                    cmd = f'"{exe_path}"'
+                else:
+                    main_py = BmTools.get_root_path() / 'main.py'
+                    cmd = f'"{exe_path}" "{main_py}"'
+                winreg.SetValueEx(reg_key, "BmScriptsBox", 0, winreg.REG_SZ, cmd)
             self.update_setting(True, 'follow_start')
             return True
         except Exception as e:
+            BM_LOG.error(f"设置开机自启失败: {e}")
             return False
 
     def _remove_from_startup_registry(self):

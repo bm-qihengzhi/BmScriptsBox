@@ -153,6 +153,7 @@ class XDownLoad(QObject):
         last_log = ""
         last_emit_time = 0.0
         slow_since = None
+        done_bytes = 0  # MUDL 上报的完成字节数，用于退出码异常时的产物完整性校验
         try:
             for line in proc.stdout:
                 line = line.strip()
@@ -190,11 +191,24 @@ class XDownLoad(QObject):
                         self._emit_from_event(evt)
                         last_emit_time = now
                 elif evt.get('s') == 'done':
-                    last_log = f"完成 {evt.get('dl', 0)} 字节"
+                    done_bytes = evt.get('dl', 0) or 0
+                    last_log = f"完成 {done_bytes} 字节"
         finally:
             self._proc = None
 
         returncode = proc.wait()
+
+        # 产物完整性优先于退出码：
+        # MUDL 在多余连接超时/TLS 异常时会把退出码置为非 0，但目标文件其实已经完整落盘
+        # （典型场景：ModelScope 上只有几百字节的 config.json / preprocessor_config.json）。
+        # 只要收到 done 事件且产物大小与其一致，就按成功处理，避免把已完成的下载误判为失败。
+        if returncode != 0 and self._artifact_complete(save_path, done_bytes):
+            BM_LOG.warning(
+                f"[MUDL] 退出码 {returncode}，但产物已完整（{done_bytes} 字节），按成功处理: {save_path}"
+            )
+            self.download_finished.emit(str(save_path))
+            return str(save_path)
+
         if returncode != 0:
             error_msg = f"下载失败: {last_log or f'MUDL 退出码 {returncode}'}"
             if is_github and self._is_china:
@@ -253,3 +267,18 @@ class XDownLoad(QObject):
     @staticmethod
     def _fmt_size(size) -> str:
         return f"{size / 1024 / 1024:.1f}MB"
+
+    @staticmethod
+    def _artifact_complete(save_path: Path, done_bytes: int) -> bool:
+        """
+        校验 MUDL 退出码异常时产物是否其实已完整。
+
+        MUDL 结束前会上报 done 事件及实际写入字节数，以此为准判断产物完整性，
+        避免「文件已下载完整但退出码非 0」被误判为失败。
+        """
+        if done_bytes <= 0:
+            return False
+        try:
+            return save_path.is_file() and save_path.stat().st_size == done_bytes
+        except OSError:
+            return False

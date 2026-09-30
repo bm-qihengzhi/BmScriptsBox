@@ -27,13 +27,14 @@ class ScriptCard(XCard):
         '本地': '#909399',
     }
 
+    MIN_CARD_W = 140
+
     uninstalled = Signal(str)
     started = Signal(str)
     updated = Signal(dict)
 
     def __init__(self, script_info):
         super().__init__()
-        self.sizeHint()
         self.set_clickable(True)
         self.script_info = script_info
         self._pin_label = None
@@ -42,15 +43,16 @@ class ScriptCard(XCard):
         self._setup_badges()
 
     def sizeHint(self):
-        # 根据父容器宽度计算卡片宽度
+        # 根据父容器实际可用宽度自适应列数，卡片在该列数下铺满，避免临界宽度下挤成少列
         parent = self.parentWidget()
         if parent and parent.layout():
-            avail = parent.width() - parent.layout().contentsMargins().left() \
-                    - parent.layout().contentsMargins().right() \
-                    - parent.layout().spacing() * 2
-            card_w = max(140, avail // 3)
+            margins = parent.layout().contentsMargins()
+            spacing = parent.layout().spacing()
+            avail = parent.width() - margins.left() - margins.right()
+            cols = max(1, (avail + spacing) // (self.MIN_CARD_W + spacing))
+            card_w = (avail - (cols - 1) * spacing) // cols
         else:
-            card_w = 140
+            card_w = self.MIN_CARD_W
         scale = self.logicalDpiY() / 96.0  # 高 DPI 缩放系数
         card_h = max(60, int(80 * scale))  # 80 是基准高度，按比例放大
         return QSize(card_w, card_h)

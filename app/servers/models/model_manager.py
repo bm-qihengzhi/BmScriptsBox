@@ -106,21 +106,42 @@ class ModelManager(QObject):
         info = manifest.get(repo_id)
         if not info:
             return False
-        if not dest_dir.exists():
+        if not dest_dir.is_dir():
             return False
 
-        existing_files = [f.name for f in dest_dir.iterdir() if f.is_file()]
-        if not existing_files:
+        # 递归扫描：带子目录的 pattern（如 onnx/model.onnx）只有相对路径才能匹配上，
+        # 只取顶层文件名会永远匹配不到，导致每次安装都重下整个仓库。
+        rel_paths, names = self._scan_files(dest_dir)
+        if not rel_paths:
             return False
 
         # 如果声明了具体文件模式，逐一验证实际文件是否存在
         if model.files and model.files != ["*"]:
             for pattern in model.files:
-                if not fnmatch.filter(existing_files, pattern):
-                    BM_LOG.warning(f"模型 {repo_id} 文件不完整（缺少 {pattern}），重新下载")
-                    return False
+                # 先按相对路径匹配（onnx/model.onnx），再退回文件名匹配（*.json）
+                if fnmatch.filter(rel_paths, pattern) or fnmatch.filter(names, pattern):
+                    continue
+                BM_LOG.warning(f"模型 {repo_id} 文件不完整（缺少 {pattern}），重新下载")
+                return False
 
         return True
+
+    @staticmethod
+    def _scan_files(root: Path):
+        """递归扫描模型目录，返回 (相对路径列表, 文件名列表)。
+
+        相对路径统一用 POSIX 正斜杠（onnx/model.onnx），与配置里 files 的写法一致。
+        """
+        rel_paths, names = [], []
+        try:
+            for p in root.rglob('*'):
+                if not p.is_file():
+                    continue
+                rel_paths.append(p.relative_to(root).as_posix())
+                names.append(p.name)
+        except OSError as e:
+            BM_LOG.warning(f"扫描模型目录失败: {root} ({e})")
+        return rel_paths, names
 
     def _read_manifest(self) -> dict:
         if not self.json_path.exists():

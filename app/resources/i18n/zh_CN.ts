@@ -978,5 +978,10 @@
         <source>Browse</source>
         <translation>浏览</translation>
     </message>
+    <message>
+        <location filename="view/scheduled_ui/scheduled_win_disp.py" line="101"/>
+        <source>Last Run</source>
+        <translation>上次运行</translation>
+    </message>
 </context>
 </TS>

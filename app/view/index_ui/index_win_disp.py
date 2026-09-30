@@ -354,8 +354,8 @@ class MainView(XWidget):
             QTimer.singleShot(100, self.login_widget.stop)
 
     def _on_show_update(self, data: dict):
-        """显示更新（信号入口，托盘模式时延后）"""
-        if self._tray_started:
+        """显示更新（信号入口，窗口隐藏/最小化时延后到重新显示）"""
+        if self._tray_started or not self.isVisible() or self.isMinimized():
             self._pending_update = data
             return
         self._do_show_update(data)

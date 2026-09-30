@@ -130,6 +130,7 @@ class ScriptsWidget(QWidget):
             script_card.started.connect(self._on_card_started)
             script_card.clicked.connect(script_card._start_script)
             self.flow_layout.addWidget(script_card)
+        self.list_container.updateGeometry()
 
 
 
