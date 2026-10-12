@@ -5,11 +5,9 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
-import os
 import sys
 import webbrowser
 import winreg
-import subprocess
 from pathlib import Path
 
 from PySide2.QtCore import QThread, Signal, QTimer
@@ -19,7 +17,6 @@ from xsideui import XLoadingMask, XNotif, XI18N, theme_manager
 from app.data import ScriptDatabase, ProjectGlobal, ConfigDatabase, TaskDatabase
 from app.utils import BmNotify, async_logger_manager, BmTools, BM_LOG
 from app.servers.monitor import get_double_monitor
-from app.servers.packages import PackagesManager
 
 
 class SettingPresenter:
@@ -97,24 +94,6 @@ class SettingPresenter:
             BM_LOG.error(f'清理日志失败:{e}')
             BmNotify().show_error_notify('清理日志失败', in_window=True, position=XNotif.Pos.CENTER)
 
-    def clean_cache(self):
-        """
-        清理未使用的依赖缓存
-        """
-        try:
-            uv_path = PackagesManager().get_uv()
-            base_path = BmTools.get_root_path()
-            cmd = [uv_path, 'cache', 'prune']
-            subprocess.Popen(
-                cmd,  # 使用cmd显式调用
-                cwd=base_path,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
-            BmNotify().show_success_notify('缓存已清理', in_window=True, position=XNotif.Pos.CENTER)
-        except Exception as e:
-            BM_LOG.error(f'清理缓存失败:{e}')
-            BmNotify().show_error_notify('清理缓存失败', in_window=True, position=XNotif.Pos.CENTER)
-
     def add_to_startup(self, state):
         """添加到启动项"""
         if state:
@@ -139,7 +118,6 @@ class SettingPresenter:
 
             with winreg.OpenKey(key, subkey, 0, winreg.KEY_SET_VALUE) as reg_key:
                 exe_path = self._get_startup_exe()
-                # PyInstaller 打包后 exe 自带入口；源码/嵌入式运行需带 main.py 参数
                 if getattr(sys, 'frozen', False):
                     cmd = f'"{exe_path}"'
                 else:
@@ -164,6 +142,34 @@ class SettingPresenter:
             return True
         except Exception as e:
             return False
+
+
+class ScanResourceThread(QThread):
+    """扫描无用资源（二进制/模型/缓存），用于清理前的预览"""
+    scanned = Signal(dict)
+
+    def run(self):
+        try:
+            from app.servers.gc import ResourceCleaner
+            report = ResourceCleaner().scan()
+        except Exception as e:
+            BM_LOG.error(f"资源扫描失败: {e}")
+            report = {}
+        self.scanned.emit(report)
+
+
+class CleanResourceThread(QThread):
+    """执行资源清理（删除无用二进制/模型 + prune 缓存）"""
+    cleaned = Signal(dict)
+
+    def run(self):
+        try:
+            from app.servers.gc import ResourceCleaner
+            result = ResourceCleaner().clean()
+        except Exception as e:
+            BM_LOG.error(f"资源清理失败: {e}")
+            result = {'error': str(e)}
+        self.cleaned.emit(result)
 
 
 class ReadConfigThread(QThread):

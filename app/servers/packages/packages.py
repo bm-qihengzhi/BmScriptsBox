@@ -5,6 +5,7 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -174,8 +175,53 @@ class PackagesManager(QObject):
             "paths": [str(p) for p in paths]
         }
 
-        with open(self.json_file, 'w', encoding='utf-8') as f:
+        self._write_manifest_atomic(data)
+
+    def downloads_path(self) -> Path:
+        return self.base_path / 'downloads'
+
+    def bin_path(self) -> Path:
+        return self.base_path / 'bin'
+
+    def iter_installed(self) -> Dict:
+        """返回本地清单副本 {name: {versions: {...}}}"""
+        return self._read_manifest()
+
+    def find_installed(self, package_name: str, version_requirement: str = ''):
+        """只读查询本地清单匹配到的 (version, path)；不触发任何下载"""
+        res = VersionMatcher().find_best_local_version(
+            self._read_manifest(), package_name, version_requirement)
+        if res.found:
+            return res.version, res.path
+        return None
+
+    def _write_manifest_atomic(self, data: Dict):
+        self.json_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.json_file.with_suffix('.json.tmp')
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(tmp, self.json_file)
+
+    def remove_manifest_entries(self, removals: Dict[str, list]):
+        """按 {name: [要删除的版本...]} 清理清单；某 name 版本删空则删 name。"""
+        if not removals:
+            return
+        data = self._read_manifest()
+        changed = False
+        for name, versions in removals.items():
+            entry = data.get(name)
+            if not entry:
+                continue
+            vers = entry.get('versions', {})
+            for v in versions:
+                if v in vers:
+                    del vers[v]
+                    changed = True
+            if not vers:
+                del data[name]
+                changed = True
+        if changed:
+            self._write_manifest_atomic(data)
 
     def _resolve_bin_paths(self, extract_dir: Path, bin_names: List[str]) -> List[Path]:
         """智能定位执行文件列表，支持多二进制"""

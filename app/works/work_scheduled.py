@@ -18,7 +18,6 @@ class ScheduledWork(QThread):
     def __init__(self):
         super().__init__()
         self.schedule = None
-        self._is_running = True
 
     def run(self):
         try:
@@ -40,11 +39,10 @@ class ScheduledWork(QThread):
         self.schedule.stop_task(task_id)
     def stop(self):
         """优雅停止调度器"""
-        self._is_running = False
         if self.schedule:
-            self.schedule.stop()
+            self.schedule.stop()   # 触发 run() 内的 _stop_event，由其正规 shutdown
         self.quit()
-        if not self.wait(3000):  # 等待调度器自行退出
+        if not self.wait(5000):  # 等待调度线程自行完成 shutdown
             self.terminate()
             self.wait()
         BM_LOG.info("定时任务已停止")

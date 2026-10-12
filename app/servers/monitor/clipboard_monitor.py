@@ -6,7 +6,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import time
 from threading import Lock
-from PySide2.QtCore import QObject, Signal
+from PySide2.QtCore import QObject, Signal, QTimer
 from app.utils import BM_LOG
 class ShortcutState:
     IDLE = 0
@@ -22,6 +22,8 @@ class ClipboardMonitor(QObject):
     """
     # 信号：成功提取文本时发射 (文本内容, 错误信息)
     triggered = Signal(str, str)
+    # 内部信号：钩子线程检测到组合键后，转交 GUI 线程做延时读取
+    _combo_matched = Signal()
 
     _instance = None
 
@@ -38,6 +40,10 @@ class ClipboardMonitor(QObject):
             # 配置参数
             self.max_interval = max_interval  # 两次 C 按下的最大间隔
             self.cleanup_interval = 10.0  # 状态自动重置时间
+            self.read_delay_ms = 150  # 延时读取剪贴板（等前台程序写完剪贴板）
+
+            # 组合键检测发生在钩子线程，经此信号转到 GUI 线程再延时读取，避免阻塞全局钩子
+            self._combo_matched.connect(self._on_shortcut_triggered)
 
             # 内部状态
             self.state = ShortcutState.IDLE
@@ -103,6 +109,9 @@ class ClipboardMonitor(QObject):
                             # 间隔太长，重新计时
                             self.state = ShortcutState.CTRL_PRESSED
                             self.last_event_time = current_time
+                    elif key_name in self.ctrl_keys and event_type == 'up':
+                        # Ctrl 提前松开，复位，避免残留状态造成误触发
+                        self.state = ShortcutState.IDLE
                     elif current_time - self.last_event_time > self.max_interval:
                         self.state = ShortcutState.IDLE
 
@@ -110,7 +119,10 @@ class ClipboardMonitor(QObject):
                     # 第二个 C 弹起，且此时 Ctrl 依然处于按下状态
                     if key_name in self.c_keys and event_type == 'up':
                         if self._kb and self._kb.is_pressed('ctrl'):
-                            self._on_shortcut_triggered()
+                            self._combo_matched.emit()  # 转交 GUI 线程延时读取
+                        self.state = ShortcutState.IDLE
+                    elif key_name in self.ctrl_keys and event_type == 'up':
+                        # Ctrl 提前松开，复位
                         self.state = ShortcutState.IDLE
                     elif current_time - self.last_event_time > self.max_interval:
                         self.state = ShortcutState.IDLE
@@ -120,12 +132,14 @@ class ClipboardMonitor(QObject):
             self.state = ShortcutState.IDLE
 
     def _on_shortcut_triggered(self):
-        """触发后的业务处理"""
-        import pyperclip
-        time.sleep(0.15)
+        """在 GUI 线程执行：延时后再读剪贴板，避免阻塞全局键盘钩子"""
+        QTimer.singleShot(self.read_delay_ms, self._read_clipboard)
 
+    def _read_clipboard(self):
+        """读取剪贴板文本（GUI 线程），使用 Qt 自带剪贴板，无额外依赖"""
         try:
-            text = pyperclip.paste()
+            from PySide2.QtWidgets import QApplication
+            text = QApplication.clipboard().text()
             if text and text.strip():
                 self.triggered.emit(text.strip(), "")
             else:

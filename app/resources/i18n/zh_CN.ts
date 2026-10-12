@@ -544,6 +544,10 @@
         <translation>每周</translation>
     </message>
     <message>
+        <source>Monthly</source>
+        <translation>每月</translation>
+    </message>
+    <message>
         <location filename="view/scheduled_ui/scheduled_win_set.py" line="140"/>
         <source>OK</source>
         <translation>确定</translation>
@@ -982,6 +986,51 @@
         <location filename="view/scheduled_ui/scheduled_win_disp.py" line="101"/>
         <source>Last Run</source>
         <translation>上次运行</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/setting_win_disp.py" line="75"/>
+        <source>Soft Settings</source>
+        <translation>软件设置</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>Push</source>
+        <translation>推送</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>WeChat ClawBot</source>
+        <translation>微信ClawBot</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>Connection Status</source>
+        <translation>连接状态</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>Push Task Results</source>
+        <translation>推送定时任务结果</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>Recipient</source>
+        <translation>收信人</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>Login / Scan</source>
+        <translation>扫码授权</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>Send Test</source>
+        <translation>发送消息</translation>
+    </message>
+    <message>
+        <location filename="view/setting_ui/push_win_set.py" line="75"/>
+        <source>Resource Cleanup</source>
+        <translation>无用资源清理</translation>
     </message>
 </context>
 </TS>

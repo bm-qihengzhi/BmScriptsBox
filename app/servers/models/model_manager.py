@@ -6,6 +6,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
 import fnmatch
+import os
 import shutil
 import time
 from pathlib import Path
@@ -160,9 +161,25 @@ class ModelManager(QObject):
             "path": path,
             "downloaded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
+        self._write_manifest_atomic(data)
+
+    def _write_manifest_atomic(self, data: dict):
         self.json_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.json_path, 'w', encoding='utf-8') as f:
+        tmp = self.json_path.with_suffix('.json.tmp')
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, self.json_path)
+
+    def iter_installed(self) -> dict:
+        return self._read_manifest()
+
+    def remove_manifest_entry(self, repo_id: str) -> bool:
+        data = self._read_manifest()
+        if repo_id in data:
+            del data[repo_id]
+            self._write_manifest_atomic(data)
+            return True
+        return False
 
     def _emit_progress(self, msg: str):
         self.model_progress.emit({'status': True, 'msg': msg})

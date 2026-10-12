@@ -52,7 +52,7 @@ class FastTextMenu(XDialog):
     def setup_list_items(self):
         # 清空列表
         self.scripts_list.clear()
-        for value in ProjectGlobal.SCRIPTS:
+        for value in (ProjectGlobal.SCRIPTS or []):
             if not value.quick_copy_active:
                 continue
             icon = value.icon
@@ -69,16 +69,12 @@ class FastTextMenu(XDialog):
             BmNotify().show_error_notify(content=tr('Clipboard content is empty'))
             return
 
-        from app.data import ProjectGlobal
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            if script_id in ProjectGlobal.RUNNING_SCRIPTS:
-                script_data = ScriptDatabase().get_script_by_id(script_id)
-                name = script_data.name if script_data else script_id
-                BmNotify().show_warning_notify(f"脚本「{name}」正在运行中，请等待完成")
-                return
-
-        # 从数据库获取脚本的输入定义
+        # 从数据库获取脚本的输入定义（脚本可能已被卸载）
         script_data = ScriptDatabase().get_script_by_id(script_id)
+        if not script_data:
+            BmNotify().show_error_notify(content=tr('脚本不存在或已被卸载'))
+            self.hide_window()
+            return
         inputs = script_data.inputs_schema
         input_data = inputs[0] if inputs else {}
         params_defs = script_data.params_schema or []
@@ -101,11 +97,27 @@ class FastTextMenu(XDialog):
             params_overrides=params_overrides,
             env_extra=build_launch_env(script_id),
         )
+        if not json_path:
+            BmNotify().show_error_notify(content=tr('参数构造失败'))
+            return
 
+        # 同一把锁内「检查 + 占位」，消除 GUI 线程与 worker 之间的启动竞态
+        from app.data import ProjectGlobal
+        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
+            if script_id in ProjectGlobal.RUNNING_SCRIPTS:
+                name = script_data.name if script_data else script_id
+                BmNotify().show_warning_notify(f"脚本「{name}」正在运行中，请等待完成")
+                return
+            ProjectGlobal.RUNNING_SCRIPTS.add(script_id)
 
-        self.run = ExecuteScriptWork(script_id=script_id, script_args=str(json_path))
-        self.run.execute_signal.connect(self._execute_notify)
-        self.run.start()
+        try:
+            self.run = ExecuteScriptWork(script_id=script_id, script_args=str(json_path))
+            self.run.execute_signal.connect(self._execute_notify)
+            self.run.start()
+        except Exception:
+            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
+                ProjectGlobal.RUNNING_SCRIPTS.discard(script_id)
+            raise
         self.hide_window()
 
     def _execute_notify(self, state):
@@ -122,49 +134,40 @@ class FastTextMenu(XDialog):
         self.show()
 
     def show(self):
-        """重写show方法，在鼠标位置下沿显示窗口（支持多显示器）"""
-        # 获取当前鼠标位置
-        cursor_pos = QCursor.pos()
-
-        # 调整窗口位置到鼠标下沿
-        # 获取窗口大小
+        """重写show方法：先让基类显示（XDialog 会居中），再纠正到鼠标位置"""
         self.adjustSize()
+        super().show()                 # 触发 XDialog.showEvent 的居中逻辑
+        self._position_near_cursor()   # 基类居中之后覆盖为鼠标位置
+        self.raise_()
+
+    def _position_near_cursor(self):
+        """把窗口定位到鼠标右下沿（支持多显示器、越界回退）"""
+        cursor_pos = QCursor.pos()
         window_width = self.width()
         window_height = self.height()
 
-        # 计算窗口位置（鼠标下沿右侧）
-        x = cursor_pos.x() + 10  # 鼠标右侧10像素
-        y = cursor_pos.y() + 10  # 鼠标下方10像素
+        # 鼠标所在的屏幕（支持多显示器）
+        mouse_screen = QApplication.screenAt(cursor_pos) or QApplication.primaryScreen()
+        screen_geometry = mouse_screen.availableGeometry()
 
-        # 获取鼠标所在的屏幕（支持多显示器）
-        mouse_screen = QApplication.screenAt(cursor_pos)
-        if mouse_screen:
-            screen_geometry = mouse_screen.availableGeometry()
-        else:
-            # 如果找不到鼠标所在的屏幕，使用主屏幕
-            screen_geometry = QApplication.primaryScreen().availableGeometry()
+        # 鼠标下沿右侧
+        x = cursor_pos.x() + 10
+        y = cursor_pos.y() + 10
 
-        # 检查右边界
+        # 右边界
         if x + window_width > screen_geometry.right():
             x = screen_geometry.right() - window_width - 10
-
-        # 检查左边界
+        # 左边界
         if x < screen_geometry.left():
             x = screen_geometry.left() + 10
-
-        # 检查下边界
+        # 下边界：下方空间不够则显示在鼠标上方
         if y + window_height > screen_geometry.bottom():
-            y = cursor_pos.y() - window_height - 10  # 如果下方空间不够，显示在鼠标上方
-
-        # 检查上边界
+            y = cursor_pos.y() - window_height - 10
+        # 上边界
         if y < screen_geometry.top():
             y = screen_geometry.top() + 10
 
-        # 设置窗口位置
         self.move(x, y)
-
-        super().show()
-        self.raise_()
 
     def showEvent(self, event):
         """窗口显示时启动鼠标监听"""
@@ -200,7 +203,10 @@ class FastTextMenu(XDialog):
             self.mouse_listener = None
 
         if self.mouse_signals:
-            self.mouse_signals.click_outside.disconnect()
+            try:
+                self.mouse_signals.click_outside.disconnect()
+            except Exception:
+                pass
             self.mouse_signals = None
 
         self.is_listening = False
@@ -208,8 +214,8 @@ class FastTextMenu(XDialog):
     def on_click(self, x, y, button, pressed):
         """鼠标点击回调函数"""
         if pressed and button == mouse.Button.left:
-            # 检查点击位置是否在widget外部
-            if not self.geometry().contains(x, y):
+            # 检查点击位置是否在widget外部（含窗口边框，避免坐标错位）
+            if not self.frameGeometry().contains(x, y):
                 # 通过信号触发隐藏，确保在UI线程中执行
                 if self.mouse_signals:
                     self.mouse_signals.click_outside.emit()

@@ -12,7 +12,7 @@ from PySide2.QtWidgets import QWidget, QVBoxLayout, QApplication, QTableWidgetIt
 from xsideui import XLabel, XTableWidget, XMenu, XSwitch, \
     XLineEdit, IconName, XIcon, XColor, XSize, XDivider, tr
 
-from app.data import ProjectGlobal, ScriptDatabase, ScriptEntity
+from app.data import ProjectGlobal, ScriptDatabase
 from app.utils.tools import BmTools
 
 
@@ -60,23 +60,24 @@ class FastTextWidget(QWidget):
 
     def filter_scripts(self):
         """搜索脚本"""
-        search_text = self.search_bar.text().strip()
+        search_text = self.search_bar.text().strip().lower()
+        all_scripts = ProjectGlobal.SCRIPTS or []
         filtered_scripts = []
         if not search_text:
-            filtered_scripts = ProjectGlobal.SCRIPTS
+            filtered_scripts = all_scripts
         else:
-            for script in ProjectGlobal.SCRIPTS:
-                script_name = script.script_name
-                if search_text in str(script_name).lower():
+            for script in all_scripts:
+                if search_text in (script.name or "").lower():
                     filtered_scripts.append(script)
 
         self.update_table(filtered_scripts)
 
     def update_table(self, data: list):
         """更新超级复制列表"""
+        data = data or []
         self.test_widget_list.setRowCount(0)
         # 计算符合条件的数据数量
-        valid_scripts = [item for item in data if item.triggers_schema['quick_copy'].get('enabled', False)]
+        valid_scripts = [item for item in data if item.triggers_schema.get('quick_copy', {}).get('enabled', False)]
 
         # 设置表格行数
         self.test_widget_list.setRowCount(len(valid_scripts))
@@ -102,8 +103,8 @@ class FastTextWidget(QWidget):
 
     def _switch_script_active(self, sid, checked):
         """切换脚本显示状态"""
-        ScriptDatabase().update_status(sid, 'quick_copy_active',checked)
-        ProjectGlobal.SCRIPTS =ScriptDatabase().get_all_scripts()
+        ScriptDatabase().update_status(sid, 'quick_copy_active', checked)
+        ProjectGlobal.SCRIPTS = ScriptDatabase().get_all_scripts()
 
     def _show_context_menu(self, pos):
         """显示右键菜单"""
@@ -144,14 +145,14 @@ class FastTextWidget(QWidget):
 
     def _script_top(self, script_data):
         """添加脚本置顶"""
-        all_scripts = ScriptDatabase().update_status(script_data.id, 'pin',True)
-        ProjectGlobal.SCRIPTS = [ScriptEntity.model_validate(r) for r in all_scripts]
+        ScriptDatabase().update_status(script_data.id, 'pin', True)
+        ProjectGlobal.SCRIPTS = ScriptDatabase().get_all_scripts()
         self.update_table(ProjectGlobal.SCRIPTS)
 
     def _script_cancel_top(self, script_data):
         """取消脚本置顶"""
-        all_scripts = ScriptDatabase().update_status(script_data.id, 'pin',False)
-        ProjectGlobal.SCRIPTS = [ScriptEntity.model_validate(r) for r in all_scripts]
+        ScriptDatabase().update_status(script_data.id, 'pin', False)
+        ProjectGlobal.SCRIPTS = ScriptDatabase().get_all_scripts()
         self.update_table(ProjectGlobal.SCRIPTS)
 
 

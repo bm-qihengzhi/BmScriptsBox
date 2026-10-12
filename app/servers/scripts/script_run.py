@@ -131,7 +131,12 @@ class ScriptRunner:
                 return
             resolved = path.resolve()
             temp_root = Path(tempfile.gettempdir()).resolve()
-            if path.suffix == '.json' and str(resolved).startswith(str(temp_root)):
+            try:
+                resolved.relative_to(temp_root)  # 严格判断是否位于系统临时目录内（兼容 Python 3.8）
+                in_temp = True
+            except ValueError:
+                in_temp = False
+            if path.suffix == '.json' and in_temp:
                 path.unlink()
                 BM_LOG.info(f"清理临时文件: {path}")
         except Exception:

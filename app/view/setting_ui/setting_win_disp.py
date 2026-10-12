@@ -11,14 +11,21 @@ from pathlib import Path
 
 from PySide2.QtCore import Signal
 from PySide2.QtWidgets import QWidget, QVBoxLayout, QApplication, QFrame
-from app.utils import BmTools
+from app.utils import BmTools, BmNotify
 from xsideui import XGroupCard, XLabel, XLineEdit, XSwitch, XPushButton, XTabWidget, IconName, XButtonVariant, XSize, \
     tr, XComboBox, XColor, theme_manager, \
-    XScrollArea
+    XScrollArea, XMessageBox, XLoadingMask
 from app.data import ProjectGlobal
-from .setting_pr import SettingPresenter
+from .setting_pr import SettingPresenter, ScanResourceThread, CleanResourceThread
 from .about_win import AboutWidget
 from .proxy_win_set import ProxyWidget
+
+try:
+    from .push_win_set import PushWidget
+    HAS_WECHAT_PUSH = True
+except Exception:
+    HAS_WECHAT_PUSH = False
+    PushWidget = None
 
 try:
     from app.cloud.view.update_win import ScriptsUpdateWidget
@@ -63,9 +70,14 @@ class SettingWidget(QWidget):
         self.tabs = XTabWidget()
         layout.addWidget(self.tabs)
 
-        self.tabs.addTab(self._basic_settings_card(), tr('Settings '))
+        self.tabs.addTab(self._basic_settings_card(), tr('Soft Settings'))
         if HAS_SCRIPT_UPDATE and ScriptsUpdateWidget:
+
             self.tabs.addTab(ScriptsUpdateWidget(), tr('Script Update'))
+        if HAS_WECHAT_PUSH and PushWidget:
+            self.push_widget = PushWidget()
+            self.tabs.addTab(self.push_widget, tr('Push'))
+
         if HAS_USER and UserWidget:
             self.user_widget = UserWidget()
             self.tabs.addTab(self.user_widget, tr('Account '))
@@ -82,7 +94,7 @@ class SettingWidget(QWidget):
         self.hotkey_combo.currentIndexChanged.connect(self.presenter.update_hotkey)
         self.check_log_btn.clicked.connect(self.presenter.check_log)
         self.clear_log_btn.clicked.connect(self.presenter.clear_log)
-        self.clean_cache_btn.clicked.connect(self.presenter.clean_cache)
+        self.clean_cache_btn.clicked.connect(self._start_clean_resources)
         self.proxy_btn.clicked.connect(self.open_proxy_win)
         self.language_combo.currentIndexChanged.connect(self.presenter.update_language)
         self.theme_combo.currentIndexChanged.connect(self.presenter.update_theme)
@@ -90,9 +102,79 @@ class SettingWidget(QWidget):
     def repost_no_login_signal(self, status):
         self.LoginBadge.emit(status)
 
+    def open_push_tab(self):
+        """切到推送 tab；tab 顺序随可选功能变化，所以按实例取索引而非硬编码位置。"""
+        widget = getattr(self, 'push_widget', None)
+        if widget is not None:
+            self.tabs.setCurrentIndex(self.tabs.indexOf(widget))
+
     def open_proxy_win(self):
         proxy_win = ProxyWidget(parent=self)
         proxy_win.exec_()
+
+    # --- 资源清理（扫描 → 确认 → loading → 执行）---
+
+    @staticmethod
+    def _format_size(n) -> str:
+        try:
+            n = float(n)
+        except (TypeError, ValueError):
+            return "0 B"
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if n < 1024 or unit == 'TB':
+                return f"{n:.0f} B" if unit == 'B' else f"{n:.1f} {unit}"
+            n /= 1024
+        return f"{n:.1f} TB"
+
+    def _start_clean_resources(self):
+        self._loading = XLoadingMask.show_loading(self, tr('Scanning...'))
+        self._scan_thread = ScanResourceThread()
+        self._scan_thread.scanned.connect(self._on_resources_scanned)
+        self._scan_thread.start()
+
+    def _on_resources_scanned(self, report: dict):
+        self._loading.hide()
+        if not report:
+            BmNotify().show_error_notify('扫描失败', in_window=True)
+            return
+        b = report.get('binaries', {})
+        m = report.get('models', {})
+        c = report.get('caches', {})
+        b_count, b_bytes = len(b.get('names', [])), b.get('bytes', 0)
+        m_count, m_bytes = len(m.get('repo_ids', [])), m.get('bytes', 0)
+        cache_names = [x for x, ok in (('uv', c.get('uv')), ('pnpm', c.get('pnpm'))) if ok]
+        if b_count == 0 and m_count == 0 and not cache_names:
+            XMessageBox.information(self, tr('Resource Cleanup'), '暂无可清理的无用资源')
+            return
+        lines = [
+            f"二进制：{b_count} 项（{self._format_size(b_bytes)}）",
+            f"模型：{m_count} 项（{self._format_size(m_bytes)}）",
+        ]
+        if cache_names:
+            lines.append("缓存：Python / Node 包缓存裁剪" )
+        lines.append(f"预计可释放：{self._format_size(report.get('total_bytes', 0))}")
+        msg = "\n".join(lines) + "\n\n仅清理未使用的包缓存、二进制文件、模型文件"
+        if not XMessageBox.ask(self, tr('Resource Cleanup'), msg):
+            return
+        self._loading = XLoadingMask.show_loading(self, tr('Cleaning...'))
+        self._clean_thread = CleanResourceThread()
+        self._clean_thread.cleaned.connect(self._on_resources_cleaned)
+        self._clean_thread.start()
+
+    def _on_resources_cleaned(self, result: dict):
+        self._loading.hide()
+        if result.get('error'):
+            BmNotify().show_error_notify(f"清理失败：{result['error']}", in_window=True)
+            return
+        freed = result.get('freed_bytes', 0)
+        fails = result.get('failures', [])
+        if fails:
+            BmNotify().show_warning_notify(
+                f"部分清理失败（{len(fails)} 项），其余完成，释放 {self._format_size(freed)}",
+                in_window=True)
+        else:
+            BmNotify().show_success_notify(
+                f"清理完成，释放 {self._format_size(freed)}", in_window=True)
 
     def update_setting(self, config):
         self.middle_click_switch.setChecked(config.get('mouse_middle'))
@@ -178,7 +260,7 @@ class SettingWidget(QWidget):
 
         # 清理缓存
         cache_group = self.basic_setting_card.add_group()
-        self.basic_setting_card.addWidget(XLabel(tr('Cache Management')), group_index=cache_group.index, stretch=1)
+        self.basic_setting_card.addWidget(XLabel(tr('Resource Cleanup')), group_index=cache_group.index, stretch=1)
         self.clean_cache_btn = XPushButton(text=tr('Clear'), size='small', color='danger',
                                            variant=XButtonVariant.FILLED, icon=IconName.CLEAR)
         self.basic_setting_card.addWidget(self.clean_cache_btn, group_index=cache_group.index, stretch=0)

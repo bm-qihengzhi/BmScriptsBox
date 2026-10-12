@@ -242,7 +242,10 @@ class ExecuteScriptFromHotkeyWork(QThread):
             params_overrides=params_overrides,
             env_extra=env_extra,
         )
-        return str(result) if result else ""
+        if not result:
+            BM_LOG.error("参数构造失败，已跳过本次快捷键执行")
+            return None
+        return str(result)
 
     def _get_resource_paths(self, input_type: str, filters: list) -> list:
         """根据类型获取 Explorer 中的路径"""

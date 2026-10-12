@@ -9,10 +9,10 @@ from enum import Enum
 
 class TimeMode(Enum):
     FIXED_INTERVAL = "固定间隔执行"
-    RANDOM_INTERVAL = "随机间隔执行"
     COUNTDOWN = "倒计时执行"
     DAILY = "每天执行"
     WEEKLY = "每周执行"
+    MONTHLY = "每月执行"
 
 
 class WeekMode(Enum):

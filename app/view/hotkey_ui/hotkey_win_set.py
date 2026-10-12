@@ -26,6 +26,7 @@ class HotkeySettingWidget(XDialog):
         self.stop_requested = None
         self.script_id = script_id
         self.hotkey_key = hotkey_key or tr("Press keys in sequence to set a shortcut")
+        self._key_set = bool(hotkey_key)
         self.script_name = script_name
         self._conflict_check_fn = conflict_check_fn
         self.resize(360, 260)
@@ -75,6 +76,7 @@ class HotkeySettingWidget(XDialog):
 
     def on_key_pressed(self, key_name):
         """处理按键事件（始终在主线程执行）"""
+        self._key_set = True
         self.hotkey_label.setText(f'{key_name}')
         if self._conflict_check_fn:
             conflict_name = self._conflict_check_fn(key_name)
@@ -87,10 +89,15 @@ class HotkeySettingWidget(XDialog):
 
     def reset_hotkey(self):
         """重置快捷键"""
+        self._key_set = False
         self.hotkey_label.setText(tr("Press keys in sequence to set a shortcut"))
         self._conflict_label.hide()
 
     def save(self):
+        if not self._key_set:
+            self._conflict_label.setText(tr('请先按键设置快捷键'))
+            self._conflict_label.show()
+            return
         self.handle_signal.emit((self.script_id, self.hotkey_label.text()))
         self.close()
 

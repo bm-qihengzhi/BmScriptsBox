@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 
+import threading
+
 from app.data import ScriptDatabase
 from PySide2.QtCore import QObject, Signal, Slot
 
@@ -28,6 +30,7 @@ class HotkeyManager(QObject):
             self.scripts = []
             self._hotkey_hooks = []
             self._kb = None  # 记录已注册的快捷键
+            self._lock = threading.RLock()  # reload/stop 跨线程互斥
 
     def start(self):
         """显式启动快捷键监听"""
@@ -36,50 +39,38 @@ class HotkeyManager(QObject):
 
     @Slot()
     def reload_hotkeys(self):
-        """当用户在脚本盒子修改了配置，调用此方法同步"""
+        """当用户在脚本盒子修改了配置，调用此方法同步（逐脚本容错，单条失败不影响其余）"""
         import keyboard as kb
-        self._kb = kb
-        try:
+        with self._lock:
+            self._kb = kb
             # 1. 精准清除旧的热键，而不是全部清除
             for hook in self._hotkey_hooks:
                 try:
                     kb.remove_hotkey(hook)
-                except:
+                except Exception:
                     pass
             self._hotkey_hooks.clear()
 
             # 2. 从数据库同步最新配置
             self.scripts = self.db.get_all_scripts()
 
-            # 3. 重新迭代注册
+            # 3. 重新迭代注册：逐脚本容错，坏键只告警不中断
+            ok = failed = 0
             for script in self.scripts:
                 if script.hotkey and script.hotkey_active:
-                    hook = kb.add_hotkey(
-                        script.hotkey,
-                        self._on_triggered,
-                        args=(script,)
-                    )
-                    self._hotkey_hooks.append(hook)  # 保存引用
-
-        except Exception as e:
-            BM_LOG.error('快捷键同步失败{}'.format(e))
-            raise RuntimeError('快捷键同步失败')
-
-    def _add_single_hotkey(self, script_info):
-        """内部注册方法"""
-        import keyboard as kb
-        try:
-            # 使用 suppress=False 可以防止快捷键被占用失效
-            kb.add_hotkey(
-                script_info.hotkey_key,
-                self._on_triggered,
-                args=(script_info,),
-                suppress=False
-            )
-
-        except Exception as e:
-            BM_LOG.error(f"无法注册热键 {script_info.hotkey_key}: {e}")
-            raise RuntimeError(f"无法注册热键: {script_info.hotkey_key}")
+                    try:
+                        hook = kb.add_hotkey(
+                            script.hotkey,
+                            self._on_triggered,
+                            args=(script,)
+                        )
+                        self._hotkey_hooks.append(hook)  # 保存引用
+                        ok += 1
+                    except Exception as e:
+                        failed += 1
+                        BM_LOG.warning(
+                            f"热键注册失败 {script.id}/{script.hotkey}: {e}")
+            BM_LOG.info(f"快捷键同步完成：成功 {ok} 个，失败 {failed} 个")
 
 
     def _on_triggered(self, script_info):
@@ -90,15 +81,16 @@ class HotkeyManager(QObject):
         self.hotkey_triggered.emit(script_info)
 
     def stop(self):
-        if not self._kb:
-            import keyboard as kb
-            self._kb = kb
-        for hook in self._hotkey_hooks:
-            try:
-                self._kb.remove_hotkey(hook)
-            except:
-                pass
-        self._hotkey_hooks.clear()
+        with self._lock:
+            if not self._kb:
+                import keyboard as kb
+                self._kb = kb
+            for hook in self._hotkey_hooks:
+                try:
+                    self._kb.remove_hotkey(hook)
+                except Exception:
+                    pass
+            self._hotkey_hooks.clear()
 
 
 _hotkey_manager_instance = None

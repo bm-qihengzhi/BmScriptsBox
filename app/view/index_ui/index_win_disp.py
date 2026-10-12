@@ -239,6 +239,13 @@ class MainView(XWidget):
         if hasattr(self.settings_widget, 'tabs'):
             self.settings_widget.tabs.setCurrentIndex(2)
 
+    def open_wechat_push_page(self):
+        """跳到设置页的推送 tab（定时任务表单里「保存并去绑定」用）。
+        必须在 _on_switch_page 之后设 tab——它末尾会把 tabs 复位到 0。"""
+        self._on_switch_page(6)
+        if hasattr(self.settings_widget, 'open_push_tab'):
+            self.settings_widget.open_push_tab()
+
     def on_login_badge(self, status):
         """未登录状态徽章管理"""
         item = self.nav_bar.get_item('me')

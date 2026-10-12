@@ -49,15 +49,49 @@ class HotkeyModel:
         return None
 
     def save_hotkey(self, script_id: str, hotkey_key: str, overwrite: bool = False) -> None:
-        """保存快捷键"""
+        """保存快捷键（校验 → 试注册 → 写库 → reload，失败回滚）"""
+        hotkey_key = (hotkey_key or '').strip()
+        if not hotkey_key:
+            raise ValueError("快捷键不能为空")
         if re.search(r'[\u4e00-\u9fa5]', hotkey_key):
             raise ValueError("快捷键不能包含中文")
+        self._assert_registerable(hotkey_key)
+
+        prev = self.db.get_script_by_id(script_id)
+        prev_key = prev.hotkey if prev else None
+
         if overwrite:
             conflict = self.find_conflict(script_id, hotkey_key)
             if conflict:
                 self.db.update_status(conflict.id, 'hotkey', None)
         self.db.update_status(script_id, 'hotkey', hotkey_key)
-        self.hotkey_manager.reload_hotkeys()
+
+        try:
+            self.hotkey_manager.reload_hotkeys()
+        except Exception:
+            # 注册失败：回滚数据库并尽力恢复旧热键
+            self.db.update_status(script_id, 'hotkey', prev_key)
+            try:
+                self.hotkey_manager.reload_hotkeys()
+            except Exception:
+                pass
+            raise
+
+    @staticmethod
+    def _assert_registerable(hotkey_key: str) -> None:
+        """用真实 add/remove 预检组合键是否可注册（避免小键盘命名差异被误判）"""
+        import keyboard as kb
+        hook = None
+        try:
+            hook = kb.add_hotkey(hotkey_key, lambda: None, suppress=False)
+        except Exception as e:
+            raise ValueError(f"无法识别的快捷键: {hotkey_key}") from e
+        finally:
+            if hook is not None:
+                try:
+                    kb.remove_hotkey(hook)
+                except Exception:
+                    pass
 
     def remove_hotkey(self, script_id: str) -> None:
         """删除快捷键"""

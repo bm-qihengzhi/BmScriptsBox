@@ -21,7 +21,7 @@ class ScriptDatabase:
     # 定义需要自动处理 JSON 的字段
     JSON_FIELDS = [
         'binaries', 'dependencies', 'inputs_schema', 'outputs_schema',
-        'params_schema', 'triggers_schema'
+        'params_schema', 'triggers_schema', 'models_schema'
     ]
 
     @staticmethod
@@ -177,6 +177,7 @@ class ScriptDatabase:
             'inputs_schema': json.dumps([i.model_dump() for i in config.inputs]),
             'outputs_schema': json.dumps([o.model_dump() for o in config.outputs]),
             'params_schema': json.dumps([p.model_dump() for p in config.params]),
+            'models_schema': json.dumps([m.model_dump() for m in config.models]),
             'workflow_enabled': config.workflow.get("workflow_enabled", True),
             'is_node': bool(config.node and config.node.enabled),
             'schedule_enabled': bool(config.schedule and config.schedule.enabled),
@@ -265,13 +266,17 @@ class TaskDatabase:
                 task_params=json.dumps(task_data.get("task_params", {})),
                 max_run_count=task_data.get('max_run_count'),
                 executed_count=task_data.get('executed_count', 0),
-                interval_minutes=task_data.get('interval_minutes'),
-                min_interval_minutes=task_data.get('min_interval_minutes'),
-                max_interval_minutes=task_data.get('max_interval_minutes'),
-                delay_minutes=task_data.get('delay_minutes'),
+                wechat_push=task_data.get('wechat_push', False),
+                interval_seconds=task_data.get('interval_seconds'),
+                jitter_seconds=task_data.get('jitter_seconds'),
+                min_interval_seconds=task_data.get('min_interval_seconds'),
+                max_interval_seconds=task_data.get('max_interval_seconds'),
+                delay_seconds=task_data.get('delay_seconds'),
                 daily_time=task_data.get('daily_time'),
                 weekly_weekday=task_data.get('weekly_weekday'),
                 weekly_time=task_data.get('weekly_time'),
+                monthly_day=task_data.get('monthly_day'),
+                monthly_time=task_data.get('monthly_time'),
                 updated_time=datetime.now()
             )
 
@@ -302,13 +307,17 @@ class TaskDatabase:
                 'task_params': json.dumps(task_data["task_params"]) if "task_params" in task_data else task.task_params,
                 'max_run_count': task_data.get('max_run_count', task.max_run_count),
                 'executed_count': task_data.get('executed_count', task.executed_count),
-                'interval_minutes': task_data.get('interval_minutes', task.interval_minutes),
-                'min_interval_minutes': task_data.get('min_interval_minutes', task.min_interval_minutes),
-                'max_interval_minutes': task_data.get('max_interval_minutes', task.max_interval_minutes),
-                'delay_minutes': task_data.get('delay_minutes', task.delay_minutes),
+                'wechat_push': task_data.get('wechat_push', task.wechat_push),
+                'interval_seconds': task_data.get('interval_seconds', task.interval_seconds),
+                'jitter_seconds': task_data.get('jitter_seconds', task.jitter_seconds),
+                'min_interval_seconds': task_data.get('min_interval_seconds', task.min_interval_seconds),
+                'max_interval_seconds': task_data.get('max_interval_seconds', task.max_interval_seconds),
+                'delay_seconds': task_data.get('delay_seconds', task.delay_seconds),
                 'daily_time': task_data.get('daily_time', task.daily_time),
                 'weekly_weekday': task_data.get('weekly_weekday', task.weekly_weekday),
                 'weekly_time': task_data.get('weekly_time', task.weekly_time),
+                'monthly_day': task_data.get('monthly_day', task.monthly_day),
+                'monthly_time': task_data.get('monthly_time', task.monthly_time),
                 'updated_time': datetime.now()
             }
 

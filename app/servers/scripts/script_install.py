@@ -537,6 +537,13 @@ class InstallScript(QObject):
         # 1. 入库
         ScriptDatabase().from_config_model(config, badge)
 
+        # 1.5 同步全局快捷键（安装/重装后刷新，失败不中断安装）
+        try:
+            from app.servers.monitor import get_hotkey_manager
+            get_hotkey_manager().reload_hotkeys()
+        except Exception as e:
+            BM_LOG.warning(f"安装后同步快捷键失败: {e}")
+
         # 2. 右键菜单
         if config.triggers and config.triggers.context_menu.enabled:
             ContextManager().add_script_menu(

@@ -33,6 +33,7 @@ class ScriptEntity(BaseModel):
     inputs_schema: List[Dict[str, Any]] = Field(default_factory=list)
     outputs_schema: List[Dict[str, Any]] = Field(default_factory=list)
     params_schema: List[Dict[str, Any]] = Field(default_factory=list)
+    models_schema: List[Dict[str, Any]] = Field(default_factory=list)  # 模型声明 ([bmscriptsbox.models])
     workflow_enabled: bool = True
     is_node: bool = False  # 可作为节点被联动调用
     schedule_enabled: bool = False  # 声明可被定时任务调度 ([bmscriptsbox.schedule])

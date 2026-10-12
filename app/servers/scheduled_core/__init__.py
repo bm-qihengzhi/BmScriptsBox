@@ -4,5 +4,5 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
-from .scheduled_core import DatabaseTaskScheduler
+from .scheduled_core_v2 import DatabaseTaskScheduler
 __all__ = ['DatabaseTaskScheduler',]

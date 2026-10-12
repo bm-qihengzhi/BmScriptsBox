@@ -115,6 +115,9 @@ class ScheduledWidget(QWidget):
             self.task_list.setItem(row, 0, item)
 
             item_2 = QTableWidgetItem(self.timing_description(task_type=data['task_type'], data=data))
+            if data.get('wechat_push'):
+                # 哪些任务跑完会推微信，在列表一眼可见
+                item_2.setText(item_2.text() + ' · 推送微信')
             self.task_list.setItem(row, 1, item_2)
             self._setup_status_switch(row, data)
             self._setup_last_run_cell(row, data['task_id'])
@@ -161,19 +164,24 @@ class ScheduledWidget(QWidget):
         # 兼容早期版本误存的中文 task_type
         task_type = _TASK_TYPE_CODE.get(task_type, task_type)
         if task_type == "fixed_interval":
-            description = f"间隔:{self._fmt_seconds(data.get('interval_minutes'))}"
+            description = f"间隔:{self._fmt_seconds(data.get('interval_seconds'))}"
+            jitter = data.get('jitter_seconds') or 0
+            if jitter:
+                description += f" ± {self._fmt_seconds(jitter)}"
             if data.get('max_run_count'):
                 description += f"（{data.get('executed_count', 0)}/{data['max_run_count']}次）"
         elif task_type == "random_interval":
-            description = f"随机间隔:{self._fmt_seconds(data.get('min_interval_minutes'))}-{self._fmt_seconds(data.get('max_interval_minutes'))}"
+            description = f"随机间隔:{self._fmt_seconds(data.get('min_interval_seconds'))}-{self._fmt_seconds(data.get('max_interval_seconds'))}"
             if data.get('max_run_count'):
                 description += f"（{data.get('executed_count', 0)}/{data['max_run_count']}次）"
         elif task_type == "countdown":
-            description = f"倒计时:{self._fmt_seconds(data.get('delay_minutes'))}"
+            description = f"倒计时:{self._fmt_seconds(data.get('delay_seconds'))}"
         elif task_type == "daily":
             description = f"每日:{str(data['daily_time'])}"
         elif task_type == "weekly":
             description = f"每{data['weekly_weekday']}{data['weekly_time']}"
+        elif task_type == "monthly":
+            description = f"每月{data.get('monthly_day')}日 {data.get('monthly_time')}"
         return description
 
     def _setup_status_switch(self, row, data):
