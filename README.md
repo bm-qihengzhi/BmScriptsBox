@@ -3,9 +3,8 @@
 <h1 align="center">不忙脚本盒子 / BmScriptsBox</h1>
 
 <p align="center">
-  <strong>Windows 跨语言脚本调度与管理软件</strong>
+  <strong>面向 Windows 的跨语言脚本管理与启动软件</strong>
   <br>
-  零门槛上手 · 全自动化环境部署 · 海量脚本一键运行
 </p>
 
 <p align="center">
@@ -16,8 +15,8 @@
 </p>
 <p align="center">
   <a href="https://www.bm-box.cn">官网</a> ·
-  <a href="https://www.bm-box.cn/help">帮助中心</a> ·
-  <a href="https://www.bm-box.cn/feedback">需求反馈</a>
+  <a href="https://www.bm-box.cn/scripts">脚本社区</a> ·
+  <a href="https://www.bm-box.cn/feedback">脚本需求</a>
   <br>
   <sub>Windows 10/11 · 完全免费 · 无功能限制</sub>
 </p>
@@ -26,9 +25,9 @@
 
 ## 简介
 
-不忙脚本盒子是一款 Windows 端跨语言桌面脚本管理工具，主打**零配置、零命令行、开箱即用**
+不忙脚本盒子是一款面向 Windows 的跨语言脚本管理器，支持 Python、Node.js、PowerShell、BAT、AutoHotkey、HTML、EXE 七种脚本形态。它把环境配置的负担从使用者转移到工具本身，为脚本提供统一的图形界面与快捷启动方式——让普通用户也能轻松用脚本提升工作效率，让开发者专注写脚本本身
 
-无需编程基础，就可以像管理手机 App 一样，可视化安装各类脚本。软件内置脚本库、包含办公、图像、音视频、系统、AI 等多场景脚本资源，支持一键部署、定时自动执行、全局快捷键快速唤起，轻松实现批量处理、日常办公、个性化自动化，满足各类效率需求。
+![不忙脚本盒子](./app/resources/imgs/bmscriptsbox.webp)
 
 ---
 
