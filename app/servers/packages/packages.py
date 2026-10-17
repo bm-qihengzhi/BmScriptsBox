@@ -6,6 +6,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import List, Dict, Any
 from PySide2.QtCore import QObject, Signal
 
 from app.servers.packages.download import XDownLoad
+from app.servers.packages.integrity import BinaryIntegrityStore, sha256_file
 from app.servers.packages.match_version import VersionMatcher
 from app.servers.packages.remote import RemoteManifestProvider
 from app.servers.packages.silent import SilentInstaller
@@ -28,7 +30,7 @@ class PackagesManager(QObject):
     """
     packages_progress = Signal(dict)
 
-    def __init__(self):
+    def __init__(self, consent_callback=None):
         super().__init__()
         self.base_path = self._get_base_path()
         self.base_path.mkdir(parents=True, exist_ok=True)
@@ -36,6 +38,8 @@ class PackagesManager(QObject):
 
         # 内部状态
         self.downloader = None
+        # 直连二进制下载确认回调：callable(payload:dict) -> bool；缺省表示无确认界面（直连将失败）
+        self._consent_callback = consent_callback
 
     # --- 基础路径配置 ---
 
@@ -45,9 +49,11 @@ class PackagesManager(QObject):
 
     # --- 核心公开接口 ---
 
-    def install_cli(self, package_name: str, version_requirement: str = '') -> str:
+    def install_cli(self, package_name: str, version_requirement: str = '',
+                    env_set_override=None) -> str:
         """
         安装单个软件包（核心逻辑）
+        env_set_override: 显式覆盖资源清单里的 env_set（None=用清单值），用于两模式统一。
         """
         try:
             # 1. 本地查重
@@ -94,7 +100,8 @@ class PackagesManager(QObject):
                 bin_paths = self._handle_silent_install(package_name, cloud_res.version, bin_paths, payload)
 
             # 7. 环境变量与持久化
-            if payload.get('env_set'):
+            effective_env_set = env_set_override if env_set_override is not None else payload.get('env_set')
+            if effective_env_set:
                 self._create_shim_exes(bin_paths, package_name)
                 self._emit_status("环境变量 Shim 重定向已创建")
 
@@ -111,22 +118,195 @@ class PackagesManager(QObject):
             BM_LOG.error(f"安装 {package_name} 失败: {e}")
             raise RuntimeError(f"软件包 [{package_name}] 部署异常: {e}")
 
-    def batch_install_cli(self, packages: List[Dict[str, str]]) -> List[str]:
-        """批量安装接口"""
-        if not packages: return []
+    def batch_install_cli(self, packages: List, script_id: str = '') -> List[str]:
+        """
+        批量安装接口。逐条分发：
+        - 官方清单模式（无 url）→ install_cli
+        - 作者直连模式（有 url）→ install_binary
+        任一失败向上抛出（由安装流程统一回滚）。
+        """
+        if not packages:
+            return []
         results = []
         for pkg in packages:
-            path = self.install_cli(pkg.get('name'), pkg.get('version', ''))
-            results.append(path)
+            spec = pkg if isinstance(pkg, dict) else pkg.model_dump()
+            if (spec.get('url') or '').strip():
+                results.append(self.install_binary(spec, script_id))
+            else:
+                results.append(self.install_cli(spec.get('name'), spec.get('version', ''),
+                                                env_set_override=spec.get('env_set')))
         return results
+
+    # --- 直连二进制（作者自备 GitHub 链接）---
+
+    def install_binary(self, spec: Dict[str, Any], script_id: str = '') -> str:
+        """
+        安装一个外部二进制声明。
+        - 无 url → 走官方清单模式（install_cli）。
+        - 有 url → 直连模式：解析 tag → 用户确认 → 下载 → sha256(显式/TOFU) → 解压或安装 → shim。
+        """
+        url = (spec.get('url') or '').strip()
+        if not url:
+            return self.install_cli(spec.get('name'), spec.get('version', ''))
+
+        name = (spec.get('name') or '').strip()
+        declared_sha = (spec.get('sha256') or '').strip().lower()
+        bin_names = [b for b in (spec.get('bin') or []) if str(b).strip()]
+        do_extract = bool(spec.get('extract', True))
+        install_opts = spec.get('install') or None
+        is_installer = self._looks_like_installer(url, install_opts)
+        # 直连模式默认不进 PATH（env_set 未声明时按 False）；仍会注入参数文件供脚本取路径
+        env_set = spec.get('env_set')
+        if env_set is None:
+            env_set = False
+
+        try:
+            # 1. 解析真实标签（/releases/latest/download/.. 会 302 到具体 tag）
+            self._emit_status(f"正在校验外部二进制来源: {name}")
+            tag = self._resolve_tag(url)
+
+            # 2. 用户确认（可被信任表跳过）
+            self._confirm_direct(name, url, tag, declared_sha, is_installer, script_id)
+
+            # 3. 下载
+            download_dir = self.base_path / 'downloads'
+            download_dir.mkdir(parents=True, exist_ok=True)
+            self.downloader = XDownLoad()
+            self.downloader.download_progress.connect(self.packages_progress.emit)
+            downloaded = Path(self.downloader.download(url, download_dir))
+
+            # 4. 完整性校验：显式 sha256 优先，否则按 tag TOFU
+            store = BinaryIntegrityStore()
+            if declared_sha:
+                if not XDownLoad.verify_sha256(downloaded, declared_sha):
+                    actual = sha256_file(downloaded)
+                    self._safe_unlink(downloaded)
+                    raise RuntimeError(
+                        f"二进制 {name} sha256 校验失败（声明={declared_sha}，实际={actual}）")
+            else:
+                actual = sha256_file(downloaded)
+                strict = self._is_version_tag(tag)
+                if not store.check_and_record_hash(name, tag, actual, strict=strict):
+                    self._safe_unlink(downloaded)
+                    raise RuntimeError(
+                        f"二进制 {name} 完整性校验失败：tag={tag} 内容与首次记录不一致（疑似篡改）")
+
+            # 5. 解压 / 静默安装 / 单文件
+            bin_paths = self._materialize_binary(downloaded, name, tag, bin_names,
+                                                 do_extract, is_installer, install_opts)
+
+            # 6. 存在性校验
+            missing = [str(p) for p in bin_paths if not Path(p).exists()]
+            if missing:
+                raise RuntimeError(f"二进制 {name} 未找到声明的可执行文件: {missing}")
+
+            # 7. shim + 清单
+            if env_set:
+                self._create_shim_exes(bin_paths, name)
+                self._emit_status("环境变量 Shim 重定向已创建")
+            self._update_manifest(name, bin_paths, tag)
+            self._emit_status(f"{name} 部署成功（{tag}）")
+            return str(bin_paths[0])
+
+        except Exception as e:
+            BM_LOG.error(f"安装直连二进制 {name} 失败: {e}")
+            if isinstance(e, RuntimeError):
+                raise
+            raise RuntimeError(f"外部二进制 [{name}] 部署异常: {e}")
+
+    def _materialize_binary(self, downloaded: Path, name: str, tag: str, bin_names: List[str],
+                            do_extract: bool, is_installer: bool, install_opts) -> List[Path]:
+        """把下载产物变成可暴露的可执行文件列表（解压 / 静默安装 / 直接使用）"""
+        if is_installer and not do_extract:
+            if not bin_names:
+                raise RuntimeError(f"二进制 {name} 为安装程序，必须声明 bin（可执行文件名）")
+            self._emit_status(f"检测到安装程序，正在执行静默部署: {name}")
+            install_dir = self.base_path / 'cli' / name / tag
+            installer = SilentInstaller()
+            ok, _ = installer.install_software(
+                installer_path=str(downloaded),
+                install_dir=str(install_dir),
+                binary_name=bin_names,
+                silent_params=install_opts)
+            if not ok:
+                raise RuntimeError(f"二进制 {name} 静默安装失败")
+            self._safe_unlink(downloaded)
+            return [Path(install_dir) / bn for bn in bin_names]
+
+        if do_extract:
+            self._emit_status("正在解压外部二进制归档...")
+            extracted = Path(ArchiveExtractor().extract(downloaded))
+            if extracted.is_dir() and not bin_names:
+                bin_names = [f"{name}.exe"]
+            paths = self._resolve_bin_paths(extracted, bin_names)
+            # 归档已解压，删除压缩包节省空间；若产物即下载文件本身（exe/msi 直通）则保留
+            try:
+                if extracted.resolve() != downloaded.resolve():
+                    self._safe_unlink(downloaded)
+            except OSError:
+                pass
+            return paths
+
+        # 单文件：直接暴露下载产物自身
+        return self._resolve_bin_paths(downloaded, bin_names)
+
+    @staticmethod
+    def _looks_like_installer(url: str, install_opts) -> bool:
+        if install_opts:
+            return True
+        clean = url.split('?')[0].split('#')[0].lower()
+        return clean.endswith('.exe') or clean.endswith('.msi')
+
+    @staticmethod
+    def _is_version_tag(tag: str) -> bool:
+        """版本型 tag（v1 / 2 / v6.1.0）→ 严格校验；latest/nightly 等滚动 tag → 放宽"""
+        return bool(re.match(r'^v?\d', (tag or '').strip()))
+
+    def _resolve_tag(self, url: str) -> str:
+        """跟随重定向解析 release tag（/releases/download/<tag>/）；失败回退 'latest'"""
+        try:
+            import requests
+            resp = requests.get(
+                url, allow_redirects=True, stream=True, timeout=(5, 15),
+                headers={'User-Agent': 'Mozilla/5.0'})
+            candidates = [resp.url] + [h.url for h in getattr(resp, 'history', [])]
+            resp.close()
+            for u in candidates:
+                m = re.search(r'/releases/download/([^/]+)/', u or '')
+                if m:
+                    return m.group(1)
+        except Exception as e:
+            BM_LOG.debug(f"[直连] 解析 tag 失败，回退 latest: {e}")
+        return 'latest'
+
+    def _confirm_direct(self, name: str, url: str, tag: str, declared_sha: str,
+                        is_installer: bool, script_id: str):
+        """直连下载前的用户确认；命中信任表则跳过；被拒则抛错终止安装"""
+        store = BinaryIntegrityStore()
+        if store.is_trusted(script_id, url):
+            return
+        if not self._consent_callback:
+            raise RuntimeError(
+                f"外部二进制 {name} 需要用户确认，但当前无确认界面，已终止安装")
+        payload = {
+            'name': name,
+            'url': url,
+            'tag': tag,
+            'sha256': declared_sha or '',
+            'is_installer': is_installer,
+            'script_id': script_id,
+        }
+        if not self._consent_callback(payload):
+            raise RuntimeError(f"用户拒绝下载外部二进制 {name}，安装已终止")
+
 
     # --- 环境特定接口 (UV / Python / Node) ---
 
     def get_uv(self) -> str:
         """获取 uv 路径并确保配置了国内镜像源"""
         uv_path = self.install_cli('uv')
-        # 确保项目根目录下有针对 uv 的配置
-        root_toml = BmTools.get_root_path() / 'bmscripts' /'pyproject.toml'
+        # 确保脚本根目录下有针对 uv 的配置（路径与 BmScripts 保持一致，避免大小写分裂）
+        root_toml = BmTools.get_base_scripts_path() / 'pyproject.toml'
         if not root_toml.exists():
             self._create_uv_config(root_toml)
             self._emit_status("UV 国内加速镜像配置完成")
@@ -194,6 +374,38 @@ class PackagesManager(QObject):
         if res.found:
             return res.version, res.path
         return None
+
+    def installed_paths(self, package_name: str, version_requirement: str = '') -> List[str]:
+        """返回匹配版本的全部可执行文件绝对路径；未安装返回 []（供启动时注入参数文件）。
+        直连模式的版本键是 GitHub tag（如 latest / jq-1.8.2），非 PEP440，故语义化匹配失败时回退。"""
+        if not package_name:
+            return []
+        data = self._read_manifest()
+        entry = data.get(package_name)
+        if not entry:
+            return []
+        versions = entry.get('versions', {}) or {}
+
+        # 1) 官方模式：语义化版本约束匹配
+        res = VersionMatcher().find_best_local_version(data, package_name, version_requirement)
+        if res.found and res.version in versions:
+            return self._version_paths(versions[res.version])
+
+        # 2) 直连模式：tag 不是合法版本号
+        req = (version_requirement or '').strip()
+        if req and req in versions:          # 声明里写了精确 tag
+            return self._version_paths(versions[req])
+        if versions:                          # 否则取最近安装的那条（与按名 last-wins 一致）
+            return self._version_paths(versions[list(versions.keys())[-1]])
+        return []
+
+    @staticmethod
+    def _version_paths(info) -> List[str]:
+        """从某版本的清单记录里取全部可执行文件路径"""
+        if not isinstance(info, dict):
+            return []
+        paths = info.get('paths') or ([info.get('path')] if info.get('path') else [])
+        return [str(p) for p in paths if p]
 
     def _write_manifest_atomic(self, data: Dict):
         self.json_file.parent.mkdir(parents=True, exist_ok=True)

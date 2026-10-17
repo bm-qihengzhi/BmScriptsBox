@@ -39,14 +39,21 @@ class InstallScript(QObject):
     progress_signal = Signal(dict)  # 过程进度反馈
     finished_signal = Signal(dict)  # 最终结果通知
 
-    def __init__(self):
+    INSTALL_MARKER = '.bm-installed.json'  # 安装成功标记（残留判定与旧版本识别用）
+
+    def __init__(self, consent_callback=None):
         super().__init__()
-        # 预初始化管理器，避免多次连接信号
+        # 预初始化管理器，信号只在构造时连接一次（避免每次部署重复连接/重复发射）
         self.py_deploy = PyEnvManager()
         self.node_deploy = NodeEnvManager()
         self.ahk_deploy = AhkEnvManager()
+        self.py_deploy.py_runtime_install_progress.connect(self.progress_signal.emit)
+        self.node_deploy.node_runtime_install_progress.connect(self.progress_signal.emit)
+        self.ahk_deploy.ahk_runtime_progress.connect(self.progress_signal.emit)
         # 依赖安装栈：记录正在安装的脚本 id，用于循环检测 + 深度限制
         self._installing_deps: set = set()
+        # 直连二进制下载确认回调（透传给 PackagesManager）；缺省=None 表示无确认界面
+        self._consent_callback = consent_callback
 
     # --- 主入口 ---
 
@@ -60,7 +67,10 @@ class InstallScript(QObject):
         installed_resources = {
             "target_dir": False,  # 物理目录
             "db_entry": False,  # 数据库记录
-            "context_menu": False  # 右键菜单
+            "context_menu": False,  # 右键菜单
+            "pre_existing": False,  # 是否覆盖既有安装（决定回滚是否保留旧版本）
+            "old_db": None,  # 覆盖前的旧数据库行（用于回滚还原）
+            "new_deps": [],  # 本次新装且需在失败时回滚的依赖
         }
         try:
             # 依赖循环检测
@@ -68,17 +78,22 @@ class InstallScript(QObject):
                 raise RuntimeError(f"脚本依赖存在循环: {script_id}")
             self._installing_deps.add(script_id)
 
+            # 0：记录是否覆盖既有安装（失败回滚时据此保留旧版本）
+            base_target = BmTools.get_root_path() / 'BmScripts' / script_id
+            installed_resources["pre_existing"] = self._is_existing_install(base_target)
+            if installed_resources["pre_existing"]:
+                installed_resources["old_db"] = ScriptDatabase().get_raw_row(script_id)
+
             # 1:创建目录
             install_target_dir = self._prepare_directory(script_id)
             installed_resources["target_dir"] = install_target_dir
 
             # 2：克隆前记录旧依赖状态
-            has_git = (install_target_dir / '.git').exists()
-            BM_LOG.debug(f"[安装流程] 目录状态: exists={install_target_dir.exists()}, has_git={has_git}")
             old_deps = self._snapshot_deps(install_target_dir)
 
-            # 3：克隆仓库
-            self._download_from_git(script_git_url, install_target_dir, branch)
+            # 3：克隆仓库（失败即止，不用坏目录继续）
+            if not self._download_from_git(script_git_url, install_target_dir, branch):
+                raise RuntimeError("脚本仓库下载失败，请检查仓库地址或网络")
 
             # 4. 配置加载
             config = self._load_config(install_target_dir)
@@ -87,17 +102,16 @@ class InstallScript(QObject):
             need_deploy = self._needs_runtime_deploy(old_deps, install_target_dir, config)
             BM_LOG.debug(f"[安装流程] 脚本 {script_id} 部署判定结果: need_deploy={need_deploy}")
             if need_deploy:
-                self._deploy_runtime(install_target_dir, config)
+                self._deploy_runtime(install_target_dir, config, script_id)
             else:
                 BM_LOG.info(f"脚本 {script_id} 依赖无变化，跳过环境部署")
 
             # 6. 系统集成 (DB与右键菜单)
-            self._register_system(config)
-            installed_resources["db_entry"] = True  # 标记 DB 已写入
-            installed_resources["context_menu"] = True  # 标记菜单已注册
+            self._register_system(config, resources=installed_resources)
 
-            # 7. 先装本体，再装依赖（依赖关系要读完 toml 才知道）
-            self._install_script_dependencies(config)
+            # 7. 写入安装标记 + 先装本体，再装依赖
+            self._mark_installed(install_target_dir)
+            self._install_script_dependencies(config, installed_resources["new_deps"])
 
             # 8. 完成通知
             if notify:
@@ -116,24 +130,38 @@ class InstallScript(QObject):
 
     def install_from_git(self, script_git_url: str, branch: str = 'main'):
         start_time = time.time()
-        installed_resources = {"target_dir": False, "db_entry": False, "context_menu": False}
+        installed_resources = {
+            "target_dir": False, "db_entry": False, "context_menu": False,
+            "pre_existing": False, "old_db": None, "new_deps": [],
+        }
         script_id = None
         temp_dir = None
         try:
             # 1. 克隆到临时目录
             temp_dir = Path(tempfile.mkdtemp(prefix='bms_'))
             installed_resources["target_dir"] = temp_dir
-            self._download_from_git(script_git_url, temp_dir, branch)
+            if not self._download_from_git(script_git_url, temp_dir, branch):
+                raise RuntimeError("脚本仓库下载失败，请检查仓库地址或网络")
 
             # 2. 读取 config 获得 script_id
             config = self._load_config(temp_dir)
             script_id = str(config.info.id)
 
-            # 3. 移动到最终目录（同盘 rename）
+            # 3. 合并到最终目录（保留既有环境与用户文件；失败不破坏旧版本）
             final_dir = BmTools.get_root_path() / 'BmScripts' / script_id
-            if final_dir.exists():
-                BmTools.remove_dir(final_dir)
-            shutil.copytree(temp_dir, final_dir, dirs_exist_ok=True)
+            installed_resources["pre_existing"] = self._is_existing_install(final_dir)
+            if installed_resources["pre_existing"]:
+                installed_resources["old_db"] = ScriptDatabase().get_raw_row(script_id)
+
+            # 覆盖前记录旧依赖状态（用于增量判定）
+            old_deps = self._snapshot_deps(final_dir)
+
+            # 目标改为最终目录：全新安装若中途失败，回滚需清理该目录
+            installed_resources["target_dir"] = final_dir
+            final_dir.mkdir(parents=True, exist_ok=True)
+            GitManager._sync_dir(Path(temp_dir), final_dir)
+
+            # 清理临时目录
             for _ in range(5):
                 try:
                     shutil.rmtree(temp_dir)
@@ -141,15 +169,17 @@ class InstallScript(QObject):
                 except PermissionError:
                     time.sleep(1)
             temp_dir = None
-            installed_resources["target_dir"] = final_dir
 
-            # 4~6. 部署 + 注册 + 依赖 + 完成
+            # 4~7. 部署 + 注册 + 依赖 + 标记
             config = self._load_config(final_dir)
-            self._deploy_runtime(final_dir, config)
-            self._register_system(config, '本地')
-            installed_resources["db_entry"] = True
-            installed_resources["context_menu"] = True
-            self._install_script_dependencies(config)
+            if self._needs_runtime_deploy(old_deps, final_dir, config):
+                self._deploy_runtime(final_dir, config, script_id)
+            else:
+                BM_LOG.info(f"脚本 {script_id} 依赖无变化，跳过环境部署")
+
+            self._register_system(config, '本地', resources=installed_resources)
+            self._mark_installed(final_dir)
+            self._install_script_dependencies(config, installed_resources["new_deps"])
 
             cost = time.time() - start_time
             self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
@@ -170,12 +200,23 @@ class InstallScript(QObject):
         installed_resources = {
             "target_dir": False,  # 物理目录
             "db_entry": False,  # 数据库记录
-            "context_menu": False  # 右键菜单
+            "context_menu": False,  # 右键菜单
+            "pre_existing": False,
+            "old_db": None,
+            "new_deps": [],
         }
         try:
             script_id = TomlManager().read_toml_id_from_zip(script_zip_path)
+            base_target = BmTools.get_root_path() / 'BmScripts' / script_id
+            installed_resources["pre_existing"] = self._is_existing_install(base_target)
+            if installed_resources["pre_existing"]:
+                installed_resources["old_db"] = ScriptDatabase().get_raw_row(script_id)
+
             install_target_dir = self._prepare_directory(script_id)
             installed_resources["target_dir"] = install_target_dir  # 标记目录已创建
+
+            # 覆盖前记录旧依赖状态（用于增量判定）
+            old_deps = self._snapshot_deps(install_target_dir)
 
             # 2. 物理部署（解压）
             actual_script_dir = self._extract_package(script_zip_path, install_target_dir)
@@ -184,15 +225,17 @@ class InstallScript(QObject):
             config = self._load_config(actual_script_dir)
 
             # 4. 环境与依赖部署 (耗时操作)
-            self._deploy_runtime(actual_script_dir, config)
+            if self._needs_runtime_deploy(old_deps, actual_script_dir, config):
+                self._deploy_runtime(actual_script_dir, config, script_id)
+            else:
+                BM_LOG.info(f"脚本 {script_id} 依赖无变化，跳过环境部署")
 
             # 5. 系统集成 (DB与右键菜单)
-            self._register_system(config, '本地')
-            installed_resources["db_entry"] = True  # 标记 DB 已写入
-            installed_resources["context_menu"] = True  # 标记菜单已注册
+            self._register_system(config, '本地', resources=installed_resources)
 
-            # 6. 先装本体，再装依赖（依赖关系要读完 toml 才知道）
-            self._install_script_dependencies(config)
+            # 6. 安装标记 + 先装本体，再装依赖
+            self._mark_installed(install_target_dir)
+            self._install_script_dependencies(config, installed_resources["new_deps"])
 
             # 7. 完成通知
             cost = time.time() - start_time
@@ -204,22 +247,27 @@ class InstallScript(QObject):
             self._notify_finished(False, self._format_friendly_error(e))
 
     # --- 脚本依赖 ---
-    def _install_script_dependencies(self, config):
-        """先装本体再装依赖：逐个检查依赖脚本，缺失则解析来源并递归安装"""
+    def _install_script_dependencies(self, config, new_dep_sink: list = None):
+        """先装本体再装依赖：逐个检查依赖脚本，缺失则解析来源并递归安装。
+        新装成功的依赖 id 会记入 new_dep_sink，供父级失败时回滚。"""
         for dep in config.dependencies or []:
-            self._install_single_dependency(config, dep.id)
+            installed = self._install_single_dependency(config, dep.id)
+            if installed and new_dep_sink is not None:
+                new_dep_sink.append(dep.id)
 
-    def _install_single_dependency(self, config, did: str):
+    def _install_single_dependency(self, config, did: str) -> bool:
+        """返回 True 表示本次新装（此前不存在），False 表示已存在/跳过"""
         if len(self._installing_deps) >= self.MAX_DEPTH:
             raise RuntimeError(f"脚本依赖链过深（>{self.MAX_DEPTH} 层），请检查依赖声明")
         if ScriptDatabase.get_script_by_id(did):
             self._emit_progress(f"依赖脚本 {did} 已安装，跳过")
-            return
+            return False
         who = config.info.name or str(config.info.id)
         self._emit_progress(f"{who} 脚本需要依赖 {did}，正在安装 ...")
         url, branch = self._resolve_dep_source(did)  # 未发布/解析失败 → raise
         self.install_from_cloud(did, url, branch, notify=False)  # 递归；依赖自身依赖继续展开
         self._emit_progress(f"依赖脚本 {did} 安装完成")
+        return True
 
     def _resolve_dep_source(self, did: str) -> tuple:
         """通过社区批量接口解析依赖脚本的仓库地址；未发布则抛错"""
@@ -292,7 +340,7 @@ class InstallScript(QObject):
         # Binaries 列表快照
         result = TomlManager().read_toml_from_dir(str(script_dir))
         if result.success and result.config:
-            snapshot['binaries'] = list(result.config.runtime.binaries or [])
+            snapshot['binaries'] = [b.model_dump() for b in (result.config.runtime.binaries or [])]
             BM_LOG.debug(f"[快照] 旧 binaries 列表: {snapshot['binaries']}")
         else:
             BM_LOG.debug("[快照] 旧配置文件不存在或解析失败")
@@ -311,27 +359,37 @@ class InstallScript(QObject):
 
         # Python 环境：比对 pyproject.toml 的依赖 + requires-python
         if lang == 'python':
-            if not (script_dir / '.venv').exists():
-                BM_LOG.debug("[部署判定] .venv 目录不存在，需要部署")
-                return True
-            if 'python_deps' not in old:
-                BM_LOG.debug("[部署判定] 旧快照无 Python 依赖信息，需要部署")
-                return True
             pyproject_file = script_dir / 'pyproject.toml'
-            if not pyproject_file.exists():
-                BM_LOG.debug("[部署判定] pyproject.toml 不存在，需要部署")
-                return True
-            try:
-                new_data = TomlManager().read_pyproject_toml_from_dir(str(script_dir))
-                new_project = new_data.get('project', {})
-                new_deps = new_project.get('dependencies', [])
-                new_requires = new_project.get('requires-python', '')
-                if old['python_deps'] != new_deps or old['python_requires'] != new_requires:
-                    BM_LOG.debug(f"[部署判定] Python 依赖变更: 旧={old['python_deps']}, 新={new_deps}")
+            new_deps = []
+            new_requires = ''
+            if pyproject_file.exists():
+                try:
+                    new_data = TomlManager().read_pyproject_toml_from_dir(str(script_dir))
+                    new_project = new_data.get('project', {})
+                    new_deps = new_project.get('dependencies', [])
+                    new_requires = new_project.get('requires-python', '')
+                except Exception as e:
+                    BM_LOG.debug(f"[部署判定] 读取新 pyproject.toml 异常: {e}，保守部署")
                     return True
-            except Exception as e:
-                BM_LOG.debug(f"[部署判定] 读取新 pyproject.toml 异常: {e}，保守部署")
-                return True
+            old_deps = old.get('python_deps', [])
+            old_requires = old.get('python_requires', '')
+
+            # 无依赖脚本不建 venv（设计决策）：新旧均无第三方依赖时不视为需要部署
+            if not new_deps and not old_deps:
+                BM_LOG.debug("[部署判定] Python 无第三方依赖，无需部署（继续比对 binaries）")
+            else:
+                if not (script_dir / '.venv').exists():
+                    BM_LOG.debug("[部署判定] .venv 目录不存在，需要部署")
+                    return True
+                if 'python_deps' not in old:
+                    BM_LOG.debug("[部署判定] 旧快照无 Python 依赖信息，需要部署")
+                    return True
+                if not pyproject_file.exists():
+                    BM_LOG.debug("[部署判定] pyproject.toml 不存在，需要部署")
+                    return True
+                if old_deps != new_deps or old_requires != new_requires:
+                    BM_LOG.debug(f"[部署判定] Python 依赖变更: 旧={old_deps}, 新={new_deps}")
+                    return True
 
         # Node 环境：比对 package.json 的 dependencies + devDependencies
         elif lang == 'node.js':
@@ -364,7 +422,7 @@ class InstallScript(QObject):
             return True
 
         # Binaries 比对
-        new_binaries = list(config.runtime.binaries or [])
+        new_binaries = [b.model_dump() for b in (config.runtime.binaries or [])]
         old_binaries = old.get('binaries')
         if old_binaries != new_binaries:
             BM_LOG.debug(f"[部署判定] binaries 变更: 旧={old_binaries}, 新={new_binaries}")
@@ -375,32 +433,94 @@ class InstallScript(QObject):
         return False
 
     def _perform_rollback(self, resources: dict, script_id: str):
-        """执行回滚清理"""
+        """执行回滚清理。若为“覆盖既有安装”，保留物理目录并还原旧数据库行，避免毁档。"""
         self._emit_progress("安装中断，正在清理残留资源...")
 
         try:
-            # 1. 清理右键菜单
-            if resources["context_menu"]:
-                ContextManager().remove_script_menu(script_id=script_id)
+            # 1. 清理右键菜单（覆盖安装时旧菜单也可能被改动，一并清理后还原）
+            if resources.get("context_menu") or resources.get("pre_existing"):
+                try:
+                    ContextManager().remove_script_menu(script_id=script_id)
+                except Exception as e:
+                    BM_LOG.warning(f"回滚清理右键菜单失败: {e}")
 
-            # 2. 清理数据库
-            if resources["db_entry"]:
-                ScriptDatabase().delete_script(script_id)
-
-            # 3. 清理物理文件 (最重要的一步)
-            if resources.get("target_dir") and resources["target_dir"].exists():
-                # 释放可能的文件占用（可选）
-                import gc;
-                gc.collect()
-                if BmTools.remove_dir(resources["target_dir"]):
-                    BM_LOG.info(f"已清理残留目录: {resources['target_dir']}")
+            # 2. 数据库：覆盖安装 → 还原旧记录；全新安装 → 删除
+            if resources.get("db_entry"):
+                if resources.get("pre_existing") and resources.get("old_db"):
+                    try:
+                        ScriptDatabase().restore_row(resources["old_db"])
+                        self._re_add_menu(resources["old_db"], script_id)
+                        from app.servers.monitor import get_hotkey_manager
+                        get_hotkey_manager().reload_hotkeys()
+                    except Exception as e:
+                        BM_LOG.warning(f"回滚还原旧脚本记录失败: {e}")
                 else:
-                    BM_LOG.warning(f"残留目录无法立即删除（已进启动清理队列）: {resources['target_dir']}")
+                    ScriptDatabase().delete_script(script_id)
+
+            # 3. 物理文件：仅删除“本次新建”的目录；覆盖安装保留旧目录
+            target = resources.get("target_dir")
+            if target and Path(target).exists():
+                if resources.get("pre_existing"):
+                    BM_LOG.warning(f"更新失败，保留原有目录不回滚: {target}")
+                else:
+                    import gc
+                    gc.collect()
+                    if BmTools.remove_dir(target):
+                        BM_LOG.info(f"已清理残留目录: {target}")
+                    else:
+                        BM_LOG.warning(f"残留目录无法立即删除（已进启动清理队列）: {target}")
+
+            # 4. 清理本次新装、但因父级失败而应回滚的依赖
+            for did in resources.get("new_deps") or []:
+                self._rollback_dependency(did)
 
             self._emit_progress("残留资源清理完毕")
 
         except Exception as rollback_err:
             BM_LOG.critical(f"回滚过程中发生二次错误: {rollback_err}")
+
+    def _rollback_dependency(self, dep_id: str):
+        """回滚一个本次新装的依赖（DB + 菜单 + 目录 + 快捷键）"""
+        try:
+            ContextManager().remove_script_menu(script_id=dep_id)
+        except Exception as e:
+            BM_LOG.warning(f"回滚依赖菜单失败 {dep_id}: {e}")
+        try:
+            ScriptDatabase().delete_script(dep_id)
+        except Exception as e:
+            BM_LOG.warning(f"回滚依赖记录失败 {dep_id}: {e}")
+        try:
+            dep_dir = BmTools.get_root_path() / 'BmScripts' / dep_id
+            if dep_dir.exists() and not BmTools.remove_dir(dep_dir):
+                BmTools.add_pending_deletion(dep_dir)
+        except Exception as e:
+            BM_LOG.warning(f"回滚依赖目录失败 {dep_id}: {e}")
+        try:
+            from app.servers.monitor import get_hotkey_manager
+            get_hotkey_manager().reload_hotkeys()
+        except Exception:
+            pass
+
+    def _re_add_menu(self, old_row: dict, script_id: str):
+        """回滚还原旧数据库行后，按旧配置重新注册右键菜单"""
+        try:
+            triggers = json.loads(old_row.get('triggers_schema') or '{}')
+        except Exception:
+            return
+        cm = triggers.get('context_menu') or {}
+        if not cm.get('enabled'):
+            return
+        try:
+            from app.data.toml_schemas import ContextMenuConfig
+            ContextManager().add_script_menu(
+                script_id=str(old_row.get('id') or script_id),
+                name=old_row.get('name', ''),
+                icon=old_row.get('icon', ''),
+                language=old_row.get('language', ''),
+                context_data=ContextMenuConfig(**cm),
+            )
+        except Exception as e:
+            BM_LOG.warning(f"回滚还原右键菜单失败: {e}")
 
     def _prepare_directory(self, script_id: str) -> Path:
         """创建安装目标目录（自动清理上此残余）"""
@@ -409,8 +529,10 @@ class InstallScript(QObject):
             script_dir = base_dir / script_id
             script_dir.mkdir(parents=True, exist_ok=True)
 
-            # 目录有文件但无配置文件 → 上此残余，清理后重新安装
-            if any(script_dir.iterdir()) and not (script_dir / 'bm-scripts-box-rc.toml').exists():
+            # 目录有文件但既无配置文件、也无安装标记 → 上此残余，清理后重新安装
+            if any(script_dir.iterdir()) \
+                    and not (script_dir / 'bm-scripts-box-rc.toml').exists() \
+                    and not (script_dir / self.INSTALL_MARKER).exists():
                 BM_LOG.info(f"检测到残余目录，清理后重新安装: {script_dir}")
                 self._emit_progress("检测到上此残留数据，正在清理...")
                 BmTools.remove_dir(script_dir)
@@ -428,19 +550,39 @@ class InstallScript(QObject):
         except Exception as e:
             raise RuntimeError(f"目录初始化失败: {e}")
 
+    def _is_existing_install(self, script_dir: Path) -> bool:
+        """判断目标目录是否是一个有效的既有安装（用于回滚时保留旧版本）"""
+        try:
+            if not script_dir.exists() or not any(script_dir.iterdir()):
+                return False
+            if (script_dir / self.INSTALL_MARKER).exists():
+                return True
+            return TomlManager().read_toml_from_dir(str(script_dir)).success
+        except Exception:
+            return False
+
+    def _mark_installed(self, script_dir: Path):
+        """写入安装成功标记（残留判定与旧版本识别用）"""
+        try:
+            Path(script_dir).mkdir(parents=True, exist_ok=True)
+            (Path(script_dir) / self.INSTALL_MARKER).write_text(
+                json.dumps({'installed_at': time.strftime("%Y-%m-%dT%H:%M:%S")},
+                           ensure_ascii=False),
+                encoding='utf-8')
+        except Exception as e:
+            BM_LOG.debug(f"写入安装标记失败: {e}")
+
     def _extract_package(self, zip_path: str, target_dir: Path) -> Path:
         """解压并定位配置文件目录"""
         try:
             with zipfile.ZipFile(zip_path, 'r') as z:
                 z.extractall(target_dir)
 
-            # 寻找配置文件
-            toml_files = list(target_dir.rglob("bm-scripts-box-rc.toml"))
-            if not toml_files:
-                raise FileNotFoundError("压缩包内缺失 bm-scripts-box-rc.toml 配置文件")
+            # 寻找配置文件（与 TomlManager 使用同一套定位规则）
+            toml_file = TomlManager().find_toml_file(target_dir)
 
             self._emit_progress("解压包文件完成")
-            return toml_files[0].parent
+            return toml_file.parent
         except Exception as e:
             raise RuntimeError(f"解压过程出错: {e}")
 
@@ -460,7 +602,7 @@ class InstallScript(QObject):
         # 返回序列化后的 config 对象
         return result.config
 
-    def _deploy_runtime(self, script_dir: Path, config):
+    def _deploy_runtime(self, script_dir: Path, config, script_id: str = ''):
         """部署运行环境（支持多语言扩展）"""
         lang = config.runtime.language.lower()
 
@@ -469,15 +611,14 @@ class InstallScript(QObject):
             pyproject = TomlManager().read_pyproject_toml_from_dir(str(script_dir))
             deps = pyproject.get('project', {}).get('dependencies', [])
 
-            # 校验版本一致性
-            if config.runtime.language_version != pyproject.get('project', {}).get('requires-python'):
-                BM_LOG.warning("警告：TOML 与 pyproject 的 Python 版本声明不一致")
-                error_msg = (
-                    f"环境定义冲突 pyproject.toml与bm-scripts-box-rc.toml文件中的 Python 版本声明不一致"
-                )
-                raise RuntimeError(error_msg)
-            self.py_deploy = PyEnvManager()
-            self.py_deploy.py_runtime_install_progress.connect(self.progress_signal.emit)
+            # 版本声明一致性：语义兼容即可，不再因写法差异（如 >=3.10 vs >=3.10.0）直接失败
+            py_requires = (pyproject.get('project', {}).get('requires-python') or '').strip()
+            toml_ver = (config.runtime.language_version or '').strip()
+            if toml_ver and py_requires and not self._python_specs_compatible(toml_ver, py_requires):
+                BM_LOG.warning(
+                    f"环境定义可能冲突：bm-scripts-box-rc.toml 的 Python 版本 '{toml_ver}' "
+                    f"与 pyproject.toml 的 requires-python '{py_requires}' 不一致，请核对")
+
             self.py_deploy.create_venv(
                 script_dir=str(script_dir),
                 spec_str=config.runtime.language_version,
@@ -485,13 +626,9 @@ class InstallScript(QObject):
             )
 
         if lang == 'node.js':
-            self.node_deploy = NodeEnvManager()
-            self.node_deploy.node_runtime_install_progress.connect(self.progress_signal.emit)
             self.node_deploy.prepare_env(script_dir=str(script_dir), node_spec=config.runtime.language_version)
 
         if lang == 'autohotkey':
-            self.ahk_deploy = AhkEnvManager()
-            self.ahk_deploy.ahk_runtime_progress.connect(self.progress_signal.emit)
             self.ahk_deploy.prepare_env(spec_str=config.runtime.language_version)
 
         if lang == "html":
@@ -513,12 +650,12 @@ class InstallScript(QObject):
             p.packages_progress.connect(self.progress_signal.emit)
             p.install_cli('pwsh')
 
-        # 处理二进制资源下载
+        # 处理二进制资源下载（官方清单模式 + 作者直连模式）
         if config.runtime.binaries:
             self._emit_progress("同步外部二进制资源...")
-            pm = PackagesManager()
+            pm = PackagesManager(consent_callback=self._consent_callback)
             pm.packages_progress.connect(self.progress_signal.emit)
-            pm.batch_install_cli(config.runtime.binaries)
+            pm.batch_install_cli(config.runtime.binaries, script_id)
 
         # 处理 AI 模型下载（失败则终止安装）
         if config.models:
@@ -530,12 +667,17 @@ class InstallScript(QObject):
             if not mm.batch_download(config.models):
                 raise RuntimeError("模型下载失败，安装已终止")
 
-    def _register_system(self, config, badge:str=''):
-        """执行数据库持久化和系统菜单注册"""
+    def _register_system(self, config, badge:str='', resources: dict = None):
+        """执行数据库持久化和系统菜单注册（逐步回填 resources 标记，供失败回滚精确清理）"""
+        def _mark(key):
+            if resources is not None:
+                resources[key] = True
+
         self._emit_progress("正在注册系统组件...")
 
         # 1. 入库
         ScriptDatabase().from_config_model(config, badge)
+        _mark("db_entry")
 
         # 1.5 同步全局快捷键（安装/重装后刷新，失败不中断安装）
         try:
@@ -553,6 +695,7 @@ class InstallScript(QObject):
                 language=config.runtime.language,
                 context_data=config.triggers.context_menu
             )
+            _mark("context_menu")
 
     # --- 辅助工具 ---
     def _emit_progress(self, msg: str):
@@ -573,6 +716,19 @@ class InstallScript(QObject):
             first_line = first_line[:117] + "..."
 
         return f"安装由于意外中断: {first_line}"
+
+    @staticmethod
+    def _python_specs_compatible(a: str, b: str) -> bool:
+        """判断两份 Python 版本声明是否语义兼容（存在共同可满足的版本即视为兼容）"""
+        if (a or '').strip() == (b or '').strip():
+            return True
+        try:
+            from packaging.specifiers import SpecifierSet
+            sa, sb = SpecifierSet(a), SpecifierSet(b)
+            candidates = ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+            return any(c in sa and c in sb for c in candidates)
+        except Exception:
+            return (a or '').strip() == (b or '').strip()
 
     def _convert_bat_to_crlf(self, directory: Path):
         """
@@ -603,8 +759,8 @@ class InstallScript(QObject):
 
                     script_file.write_bytes(content)
 
-                except Exception as e:
-                    BM_LOG.error('CRLF转换失败')
+                except Exception:
+                    BM_LOG.error(f'CRLF转换失败: {script_file}')
 
 
 

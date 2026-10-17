@@ -11,14 +11,38 @@ from PySide2.QtCore import QThread, Signal
 from app.data import ProjectGlobal
 from app.data import ScriptDatabase
 from app.data.database import TaskDatabase
-from app.utils import BM_LOG, ParameterManager, BmTools
+from app.utils import BM_LOG, BmTools
 from app.servers.context import ContextManager
-from app.servers.scripts import ScriptRunner, InstallScript
+from app.servers.scripts import InstallScript
 from app.utils.parameter_generate import build_launch_env
 from app.servers.monitor import HotkeyManager
 from app.servers.explorer import COMManager, SelectedFilesInExplorer, SelectedFolderInExplorer, \
     SelectedFilesAndFolderInExplorer, FileExplorerManager
 
+
+def _bridge_consent(owner, payload: dict) -> bool:
+    """
+    安装工作线程内的直连二进制确认桥接：
+    向主线程发射确认信号并阻塞等待用户在弹窗中的选择（超时按拒绝处理）。
+    选择"记住"时写入信任表。
+    """
+    import threading
+    ev = threading.Event()
+    payload = dict(payload or {})
+    payload['_event'] = ev
+    payload['_result'] = {'allow': False, 'remember': False}
+    owner.consent_signal.emit(payload)
+    if not ev.wait(timeout=600):
+        BM_LOG.warning("外部二进制下载确认超时，按拒绝处理")
+        return False
+    result = payload.get('_result') or {}
+    if result.get('allow') and result.get('remember'):
+        try:
+            from app.servers.packages.integrity import BinaryIntegrityStore
+            BinaryIntegrityStore().trust(payload.get('script_id', ''), payload.get('url', ''))
+        except Exception as e:
+            BM_LOG.warning(f"写入二进制信任表失败: {e}")
+    return bool(result.get('allow'))
 
 
 class InstallCloudScriptWork(QThread):
@@ -28,6 +52,7 @@ class InstallCloudScriptWork(QThread):
 
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
+    consent_signal = Signal(dict)
 
     def __init__(self, script_id:str, script_git_url:str, branch:str='main'):
         super().__init__()
@@ -36,7 +61,7 @@ class InstallCloudScriptWork(QThread):
         self.branch = branch
 
     def run(self):
-        install = InstallScript()
+        install = InstallScript(consent_callback=lambda p: _bridge_consent(self, p))
         install.progress_signal.connect(self.progress_back)
         install.finished_signal.connect(self.finished_back)
         install.install_from_cloud(script_id=self.script_id, script_git_url=self.script_git_url, branch=self.branch)
@@ -55,13 +80,14 @@ class InstallLocalScriptWork(QThread):
 
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
+    consent_signal = Signal(dict)
 
     def __init__(self, script_path):
         super().__init__()
         self.script_path = script_path
 
     def run(self):
-        install = InstallScript()
+        install = InstallScript(consent_callback=lambda p: _bridge_consent(self, p))
         install.progress_signal.connect(self.progress_back)
         install.finished_signal.connect(self.finished_back)
         install.install_from_local(self.script_path)
@@ -81,6 +107,7 @@ class InstallGitScriptWork(QThread):
 
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
+    consent_signal = Signal(dict)
 
     def __init__(self, git_url, branch):
         super().__init__()
@@ -88,7 +115,7 @@ class InstallGitScriptWork(QThread):
         self.branch = branch
 
     def run(self):
-        install = InstallScript()
+        install = InstallScript(consent_callback=lambda p: _bridge_consent(self, p))
         install.progress_signal.connect(self.progress_back)
         install.finished_signal.connect(self.finished_back)
         install.install_from_git(self.git_url, self.branch)
@@ -159,27 +186,24 @@ class UninstallScriptWork(QThread):
 
 class ExecuteScriptWork(QThread):
     """
-    执行脚本工作线程
+    执行脚本工作线程（携带 ScriptLaunchService 构造好的 LaunchContext）
     """
     execute_signal = Signal(bool)
 
-    def __init__(self, script_id, script_args=''):
+    def __init__(self, ctx):
         super().__init__()
-        self.script_id = script_id
-        self.script_args = script_args
+        self.ctx = ctx
 
     def run(self):
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            ProjectGlobal.RUNNING_SCRIPTS.add(self.script_id)
+        from app.servers.scripts import ScriptLaunchService
         try:
             self.execute_signal.emit(True)
-            execute = ScriptRunner()
-            execute.run_script(self.script_id, self.script_args)
+            ScriptLaunchService.run(self.ctx)
         except Exception as e:
+            BM_LOG.error(f"执行脚本失败 {self.ctx.script_id}: {e}", exc_info=True)
             self.execute_signal.emit(False)
         finally:
-            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-                ProjectGlobal.RUNNING_SCRIPTS.discard(self.script_id)
+            ScriptLaunchService.cleanup(self.ctx)
 
 
 
@@ -197,55 +221,55 @@ class ExecuteScriptFromHotkeyWork(QThread):
         self.script_id = script_id
 
     def run(self):
+        from app.servers.scripts import ScriptLaunchService
         pythoncom.CoInitialize()
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            ProjectGlobal.RUNNING_SCRIPTS.add(self.script_id)
+        ctx = None
         try:
             self.execute_script_signal.emit({'status': True, 'message': '正在准备参数...'})
-            json_path = self._prepare_params_file()
-            if json_path is None:  # 参数表单被取消
+            # 原子占用：消除"检查-注册"竞态，快速连按不再双跑
+            if not ScriptLaunchService.reserve(self.script_id):
+                self.execute_script_signal.emit(
+                    {'status': False, 'message': '脚本正在运行中，请等待完成'})
                 return
-            ScriptRunner().run_script(self.script_id, str(json_path))
+            try:
+                ctx = self._prepare_context()
+            except Exception:
+                ScriptLaunchService.release(self.script_id)
+                raise
+            if ctx is None:  # 参数表单被取消
+                ScriptLaunchService.release(self.script_id)
+                return
+            ScriptLaunchService.run(ctx)
         except Exception as e:
             BM_LOG.error(f"执行失败: {e}")
             self.execute_script_signal.emit({'status': False, 'message': f"执行出错: {e}"})
         finally:
-            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-                ProjectGlobal.RUNNING_SCRIPTS.discard(self.script_id)
+            if ctx is not None:
+                ScriptLaunchService.cleanup(ctx)
             pythoncom.CoUninitialize()
 
-    def _prepare_params_file(self):
-        """获取资源路径并写入临时文件"""
+    def _prepare_context(self):
+        """获取资源路径并构造 LaunchContext（参数表单在 prepare 内处理）"""
+        from app.servers.scripts import ScriptLaunchService, ScriptNotFoundError
+        from app.utils.parameter_generate import build_launch_env
         script_data = ScriptDatabase().get_script_by_id(self.script_id)
-        inputs = script_data.inputs_schema
-        input_data = inputs[0] if inputs else {}
+        if script_data is None:
+            raise ScriptNotFoundError(f"脚本不存在或已被卸载: {self.script_id}")
+
         shortcut_config = script_data.triggers_schema.get('shortcut', {})
         input_type = shortcut_config.get('input_type') or ''
         filters = shortcut_config.get('filters') or []
 
         # 获取路径列表
         paths = self._get_resource_paths(input_type, filters)
-        params_overrides = {}
-        if getattr(script_data, 'params_form_enabled', False):
-            from app.view.script_ui.params_prompt import show_params_prompt
-            res = show_params_prompt(script_data, paths)
-            if res is None:  # 用户取消 → 不启动
-                return None
-            paths, params_overrides = res
 
-        # 构造参数 JSON（注入 params 默认值，使本脚本可作为联动发起方）
-        params_defs = script_data.params_schema or []
-        env_extra = build_launch_env(self.script_id)
-        result = ParameterManager().construct_parameters(
-            input_data, paths,
-            params_defs=params_defs,
-            params_overrides=params_overrides,
-            env_extra=env_extra,
+        # 构造参数 JSON（注入 environment，使本脚本可作为联动发起方）
+        return ScriptLaunchService.prepare(
+            self.script_id, data=paths,
+            invoke_mode='manual', allow_params_form=True,
+            reserve_first=False,
+            env_extra=build_launch_env(self.script_id),
         )
-        if not result:
-            BM_LOG.error("参数构造失败，已跳过本次快捷键执行")
-            return None
-        return str(result)
 
     def _get_resource_paths(self, input_type: str, filters: list) -> list:
         """根据类型获取 Explorer 中的路径"""
@@ -288,7 +312,7 @@ class ReadScriptsThread(QThread):
         if self.db is None:
             self.db = ScriptDatabase()
         scripts_data = self.db.get_all_scripts()
-        ProjectGlobal.SCRIPTS = scripts_data  # 全局变量
+        ProjectGlobal.safe_set('SCRIPTS', scripts_data)  # 全局变量（加锁写入）
         self.get_scripts_signal.emit(scripts_data)
 
 

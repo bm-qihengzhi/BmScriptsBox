@@ -66,13 +66,7 @@ class MainPresenter(QObject):
     def _on_hotkey_triggered(self, hotkey_info):
         if not hotkey_info:
             return
-        from app.data import ProjectGlobal
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            if hotkey_info.id in ProjectGlobal.RUNNING_SCRIPTS:
-                BM_LOG.warning(f"脚本 {hotkey_info.id} 正在执行中，跳过重复触发")
-                name = getattr(hotkey_info, 'name', hotkey_info.id)
-                BmNotify().show_warning_notify(f"脚本「{name}」正在运行中，请等待完成")
-                return
+        # 单例约束由 ExecuteScriptFromHotkeyWork 原子占用统一保证，此处不再预检查
         self.hide_window.emit()
         try:
             from app.works import ExecuteScriptFromHotkeyWork
@@ -89,6 +83,7 @@ class MainPresenter(QObject):
         """处理脚本执行结果"""
         if not msg.get('status'):
             BmNotify().show_error_notify(msg.get('message'))
+            self.show_window.emit()
         else:
             BmNotify().show_info_notify("正在执行脚本")
 

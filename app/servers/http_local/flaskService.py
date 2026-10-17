@@ -4,6 +4,7 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
+import os
 import tempfile
 import threading
 import uuid
@@ -13,14 +14,29 @@ import flask
 from PySide2.QtCore import QObject, Signal
 from app.data import ScriptDatabase
 from app.utils import BM_LOG, BmTools, ParameterManager
-from app.servers.scripts import ScriptRunner
+from app.servers.scripts import ScriptLaunchService, ScriptBusyError, ScriptNotFoundError
 from app.utils.parameter_generate import build_launch_env
+
+
+def _as_bool(value) -> bool:
+    """严格布尔解析：仅 True/'true'/'1'/1 为真，避免 'false' 被 str 真值误判"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return False
 
 
 # 链接链防死循环：盒子侧同步调用深度计数（同步联动天然嵌套，深度=真实链路层数）
 _LINK_LOCK = threading.Lock()
 _LINK_DEPTH = 0
 MAX_LINK_DEPTH = 8
+
+# 直接自环兜底：当前正在嵌套链路中的 script_id 集合（覆盖并发误判下漏网的自环）
+_LINK_ACTIVE_LOCK = threading.Lock()
+_LINK_ACTIVE_SCRIPTS = set()
 
 
 def _enter_link() -> bool:
@@ -47,7 +63,7 @@ class FlaskSignals(QObject):
     request_received = Signal(str)
     error_occurred = Signal(str)
     show_notify = Signal(tuple)
-    execute_script_request = Signal(str, str)
+    execute_script_request = Signal(object)
 
 
 class FlaskServer:
@@ -55,14 +71,26 @@ class FlaskServer:
         self.host = host
         self.port = port
         self.app = flask.Flask(__name__)
+        self.app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 限制请求体大小
         self.setup_routes()
         self.signals = FlaskSignals()
 
 
 
     def setup_routes(self):
+        self._setup_local_guard()
         self._setup_open_routes()
         self._setup_closed_routes()
+
+    def _setup_local_guard(self):
+        """仅接受本机回环请求（服务绑定 127.0.0.1，此处为纵深防御）"""
+        @self.app.before_request
+        def _guard_local_only():
+            addr = flask.request.remote_addr or ''
+            if addr not in ('127.0.0.1', '::1', 'localhost'):
+                BM_LOG.warning(f"拒绝非本机请求: {addr} {flask.request.path}")
+                return flask.jsonify({"status": "error", "message": "仅允许本机访问"}), 403
+
 
     def _setup_open_routes(self):
         """注册开源路由"""
@@ -76,11 +104,11 @@ class FlaskServer:
                     body = {k: v for k, v in flask.request.form.items()}
 
                 script_id = body.get('script_id')
-                if not script_id:
-                    return flask.jsonify({"status": "error", "message": "缺少script_id参数"}), 400
+                if not script_id or not isinstance(script_id, str) or len(script_id) > 64:
+                    return flask.jsonify({"status": "error", "message": "缺少或非法 script_id 参数"}), 400
 
                 temp_file_path = body.get('temp_file')
-                sync = bool(body.get('sync', False))
+                sync = _as_bool(body.get('sync', False))
                 data = body.get('data')
                 params = body.get('params')
 
@@ -91,6 +119,8 @@ class FlaskServer:
 
                 # 主数据：旧 temp_file 触发流 / 新结构化 data
                 if temp_file_path:
+                    if not self._is_allowed_temp_file(temp_file_path):
+                        return flask.jsonify({"status": "error", "message": "非法 temp_file 路径"}), 400
                     if not Path(temp_file_path).exists():
                         return flask.jsonify({"status": "error", "message": f"文件不存在: {temp_file_path}"}), 404
                     params_list = BmTools.get_temp_context(temp_file_path)
@@ -99,17 +129,14 @@ class FlaskServer:
 
                 # 参数表单：声明了 params_form 的脚本触发时弹窗，携带数据预填。
                 # 同步/自动调用不弹窗（按给定参数执行）；非同步（右键 DLL）异步弹窗，HTTP 立即返回避免调用方超时。
-                if getattr(script_data, 'params_form_enabled', False):
-                    if sync:
-                        pass
-                    else:
-                        threading.Thread(
-                            target=self._prompt_then_emit,
-                            args=(script_id, script_data, params_list),
-                            daemon=True,
-                        ).start()
-                        return flask.jsonify(
-                            {"status": "awaiting_input", "message": "参数确认中，完成确认后自动执行"}), 200
+                if getattr(script_data, 'params_form_enabled', False) and not sync:
+                    threading.Thread(
+                        target=self._prompt_then_emit,
+                        args=(script_id, params_list),
+                        daemon=True,
+                    ).start()
+                    return flask.jsonify(
+                        {"status": "awaiting_input", "message": "参数确认中，完成确认后自动执行"}), 200
 
                 # params：toml 默认值 + 调用方覆盖，再校验 required/choices
                 params_defs = script_data.params_schema or []
@@ -118,30 +145,39 @@ class FlaskServer:
                 if check_err:
                     return flask.jsonify({"status": "error", "message": check_err}), 400
 
-                # 为被调脚本重建 environment（任务唯一 output_json，供脚本写回结果；仅同步才需要）
-                output_json = str(Path(tempfile.gettempdir()) / f"bms_{uuid.uuid4().hex}.out.json") if sync else None
-                env_extra = build_launch_env(
-                    script_id,
-                    api_base=f"http://{self.host}:{self.port}",
-                    invoke_mode="node" if sync else "manual",
-                )
-                input_data = script_data.inputs_schema[0] if script_data.inputs_schema else {'name': 'source_path'}
-                json_path = ParameterManager().construct_parameters(
-                    input_data, params_list,
-                    output_json=output_json,
-                    params_defs=params_defs,
-                    params_overrides=params,
-                    env_extra=env_extra,
-                )
-                if not json_path:
-                    return flask.jsonify({"status": "error", "message": "参数文件构造失败"}), 500
+                api_base = f"http://{self.host}:{self.port}"
 
-                # 同步调用：跑完直接返回结果；否则 fire-and-forget
                 if sync:
-                    result = ScriptRunner().run_script_sync(script_id, str(json_path))
+                    # 同步调用：不占用运行键（节点可重入），跑完直接返回结果
+                    output_json = str(Path(tempfile.gettempdir()) / f"bms_{uuid.uuid4().hex}.out.json")
+                    env_extra = build_launch_env(script_id, api_base=api_base, invoke_mode="node")
+                    ctx = ScriptLaunchService.prepare(
+                        script_id, data=params_list, params_overrides=params,
+                        params_defs=params_defs, invoke_mode="node",
+                        allow_params_form=False, reserve_first=False,
+                        output_json=output_json, env_extra=env_extra,
+                    )
+                    try:
+                        result = ScriptLaunchService.run(ctx, sync=True)
+                    finally:
+                        ScriptLaunchService.cleanup(ctx)
                     return self._sync_response(result), 200
 
-                self.signals.execute_script_request.emit(script_id, str(json_path))
+                # 异步：原子占用 + 构造参数，随后交给工作线程执行
+                env_extra = build_launch_env(script_id, api_base=api_base, invoke_mode="manual")
+                try:
+                    ctx = ScriptLaunchService.prepare(
+                        script_id, data=params_list, params_overrides=params,
+                        params_defs=params_defs, invoke_mode="manual",
+                        allow_params_form=False, reserve_first=True, env_extra=env_extra,
+                    )
+                except ScriptBusyError:
+                    return flask.jsonify(
+                        {"status": "error", "message": "脚本正在运行中，请等待完成"}), 200
+                except ScriptNotFoundError as e:
+                    return flask.jsonify({"status": "error", "message": str(e)}), 404
+
+                self.signals.execute_script_request.emit(ctx)
                 return flask.jsonify({"status": "success", "message": "脚本执行请求已接收"}), 200
 
             except Exception as e:
@@ -173,11 +209,20 @@ class FlaskServer:
                         {"status": "error",
                          "message": f"脚本 '{script_data.name}' 未声明可作为节点，不允许联动调用"}), 403
 
-                # 3. 链深门禁：同步嵌套深度超限视为死循环
+                # 3. 自环兜底：同一 script_id 已在嵌套链路中 → 判定为直接自环
+                with _LINK_ACTIVE_LOCK:
+                    if script_id in _LINK_ACTIVE_SCRIPTS:
+                        return flask.jsonify(
+                            {"status": "error",
+                             "message": f"检测到脚本自环调用: {script_id}"}), 400
+
+                # 4. 链深门禁：同步嵌套深度超限视为死循环
                 if not _enter_link():
                     return flask.jsonify(
                         {"status": "error",
                          "message": "联动链路过深（超过 8 层），已拦截"}), 400
+                with _LINK_ACTIVE_LOCK:
+                    _LINK_ACTIVE_SCRIPTS.add(script_id)
                 try:
                     data = body.get('data')
                     params = body.get('params')
@@ -198,20 +243,20 @@ class FlaskServer:
                         api_base=f"http://{self.host}:{self.port}",
                         invoke_mode="node",
                     )
-                    input_data = script_data.inputs_schema[0] if script_data.inputs_schema else {'name': 'source_path'}
-                    json_path = ParameterManager().construct_parameters(
-                        input_data, params_list,
-                        output_json=output_json,
-                        params_defs=params_defs,
-                        params_overrides=params,
-                        env_extra=env_extra,
+                    ctx = ScriptLaunchService.prepare(
+                        script_id, data=params_list, params_overrides=params,
+                        params_defs=params_defs, invoke_mode="node",
+                        allow_params_form=False, reserve_first=False,
+                        output_json=output_json, env_extra=env_extra,
                     )
-                    if not json_path:
-                        return flask.jsonify({"status": "error", "message": "参数文件构造失败"}), 500
-
-                    result = ScriptRunner().run_script_sync(script_id, str(json_path))
+                    try:
+                        result = ScriptLaunchService.run(ctx, sync=True)
+                    finally:
+                        ScriptLaunchService.cleanup(ctx)
                     return self._sync_response(result), 200
                 finally:
+                    with _LINK_ACTIVE_LOCK:
+                        _LINK_ACTIVE_SCRIPTS.discard(script_id)
                     _exit_link()
 
             except Exception as e:
@@ -276,6 +321,23 @@ class FlaskServer:
             pass
 
     @staticmethod
+    def _is_allowed_temp_file(file_path: str) -> bool:
+        """限定 temp_file 位于系统临时目录或盒子根目录内，避免任意文件读取"""
+        try:
+            target = os.path.realpath(str(file_path))
+            temp_dir = os.path.realpath(tempfile.gettempdir())
+            root_dir = os.path.realpath(str(BmTools.get_root_path()))
+        except Exception:
+            return False
+        for base in (temp_dir, root_dir):
+            try:
+                if os.path.commonpath([target, base]) == base:
+                    return True
+            except ValueError:  # 跨盘符
+                continue
+        return False
+
+    @staticmethod
     def _validate_params(params_defs: list, merged: dict) -> str:
         """校验必填与 select 取值；通过返回 None，否则返回错误消息"""
         for pd in params_defs or []:
@@ -313,33 +375,50 @@ class FlaskServer:
             "result": result_body,
         }
 
-    def _prompt_then_emit(self, script_id, script_data, params_list):
+    def _prompt_then_emit(self, script_id, params_list):
         """异步参数表单：弹窗请用户确认（阻塞在自身线程），确认后按所选参数启动；用于右键 DLL 等外部触发"""
         try:
             from app.view.script_ui.params_prompt import show_params_prompt
-            res = show_params_prompt(script_data, params_list)
-            if res is None:  # 用户取消，不启动
+            script_data = ScriptDatabase().get_script_by_id(script_id)
+            if not script_data:
                 return
-            params_list, user_params = res
-            params_defs = script_data.params_schema or []
-            check_err = self._validate_params(
-                params_defs, ParameterManager()._merge_params(params_defs, user_params))
-            if check_err:
+            # 先原子占用，避免弹窗期间被其它入口重复触发
+            if not ScriptLaunchService.reserve(script_id):
                 return
-            env_extra = build_launch_env(
-                script_id,
-                api_base=f"http://{self.host}:{self.port}",
-                invoke_mode="manual",
-            )
-            input_data = script_data.inputs_schema[0] if script_data.inputs_schema else {'name': 'source_path'}
-            json_path = ParameterManager().construct_parameters(
-                input_data, params_list,
-                params_defs=params_defs,
-                params_overrides=user_params,
-                env_extra=env_extra,
-            )
-            if json_path:
-                self.signals.execute_script_request.emit(script_id, str(json_path))
+            try:
+                res = show_params_prompt(script_data, params_list)
+                if res is None:  # 用户取消，不启动
+                    ScriptLaunchService.release(script_id)
+                    return
+                data_list, user_params = res
+                params_defs = script_data.params_schema or []
+                check_err = self._validate_params(
+                    params_defs, ParameterManager()._merge_params(params_defs, user_params))
+                if check_err:
+                    ScriptLaunchService.release(script_id)
+                    return
+                env_extra = build_launch_env(
+                    script_id,
+                    api_base=f"http://{self.host}:{self.port}",
+                    invoke_mode="manual",
+                )
+                try:
+                    ctx = ScriptLaunchService.prepare(
+                        script_id, data=data_list, params_overrides=user_params,
+                        params_defs=params_defs, invoke_mode="manual",
+                        allow_params_form=False, reserve_first=False,
+                        env_extra=env_extra,
+                    )
+                except Exception:
+                    ScriptLaunchService.release(script_id)
+                    raise
+                if ctx is None:
+                    ScriptLaunchService.release(script_id)
+                    return
+                self.signals.execute_script_request.emit(ctx)
+            except Exception:
+                ScriptLaunchService.release(script_id)
+                raise
         except Exception as e:
             BM_LOG.error(f"参数表单异步启动失败 {script_id}: {e}")
 

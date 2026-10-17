@@ -54,6 +54,21 @@ class InstallScriptWindow(XDialog):
         anim.start()
         self._fade_anim = anim
 
+    def closeEvent(self, event):
+        """安装线程运行中禁止关闭，避免信号发往已销毁的窗口"""
+        for work in (self.install_work, self.git_install_work, self.could_install_work):
+            if work is None:
+                continue
+            try:
+                running = work.isRunning()
+            except RuntimeError:  # 底层对象已被 deleteLater 释放
+                running = False
+            if running:
+                self.append_styled_log('正在安装，请等待完成后再关闭...', 'ERROR')
+                event.ignore()
+                return
+        super().closeEvent(event)
+
     def dragEnterEvent(self, event):
         """拖拽进入：仅本地安装面板接受 .zip 文件"""
         if not self.show_local or not hasattr(self, 'script_path_input'):
@@ -138,7 +153,7 @@ class InstallScriptWindow(XDialog):
         lay_git = QGridLayout(self.git_pane)
         lay_git.setContentsMargins(0, 11, 0, 11)
         lay_git.setSpacing(11)
-        lay_git.addWidget(XLabel(tr('Repo url:：'), parent=self), 0,0)
+        lay_git.addWidget(XLabel(tr('Repo url:'), parent=self), 0,0)
         self.git_input = XLineEdit(placeholder=tr("GitHub repo URL only (HTTPS)"))
         self.git_input.setAcceptDrops(False)
         lay_git.addWidget(self.git_input, 0 , 1, 1, 2)
@@ -185,6 +200,8 @@ class InstallScriptWindow(XDialog):
         self.git_install_work = InstallGitScriptWork(git_url=git_url,branch=branch)
         self.git_install_work.finished_signal.connect(self._install_complete)
         self.git_install_work.progress_signal.connect(self._install_progress)
+        self.git_install_work.consent_signal.connect(self._handle_consent)
+        self.git_install_work.finished.connect(self.git_install_work.deleteLater)
         self.git_install_work.start()
 
         self.terminal.append("正在安装脚本...")
@@ -198,6 +215,8 @@ class InstallScriptWindow(XDialog):
                                                          branch=branch)
         self.could_install_work.finished_signal.connect(self._install_complete)
         self.could_install_work.progress_signal.connect(self._install_progress)
+        self.could_install_work.consent_signal.connect(self._handle_consent)
+        self.could_install_work.finished.connect(self.could_install_work.deleteLater)
         self.could_install_work.start()
 
         self.terminal.append("正在安装脚本...")
@@ -224,6 +243,8 @@ class InstallScriptWindow(XDialog):
         self.install_work = InstallLocalScriptWork(script_path)
         self.install_work.progress_signal.connect(self._install_progress)
         self.install_work.finished_signal.connect(self._install_complete)
+        self.install_work.consent_signal.connect(self._handle_consent)
+        self.install_work.finished.connect(self.install_work.deleteLater)
         self.install_work.start()
 
         self.terminal.append("正在安装脚本...")
@@ -248,6 +269,21 @@ class InstallScriptWindow(XDialog):
             level = "ERROR"
 
         self.append_styled_log(msg, level)
+
+    def _handle_consent(self, payload: dict):
+        """外部二进制下载确认：弹窗询问用户，回填结果并唤醒安装线程"""
+        from app.view.script_ui.binary_consent_dialog import BinaryConsentDialog
+        try:
+            dialog = BinaryConsentDialog(payload, parent=self)
+            dialog.exec_()
+            allow, remember = dialog.get_result()
+        except Exception as e:
+            self.append_styled_log(f"二进制确认弹窗异常: {e}", "ERROR")
+            allow, remember = False, False
+        payload['_result'] = {'allow': allow, 'remember': remember}
+        ev = payload.get('_event')
+        if ev is not None:
+            ev.set()
 
     def _install_complete(self, callback_data: dict):
         """安装完成回调"""

@@ -9,7 +9,6 @@ from PySide2.QtCore import QThread
 
 from app.servers.http_local import FlaskServer, FlaskSignals
 from app.utils import BM_LOG
-from app.servers.scripts import ScriptRunner
 
 
 class FlaskWork(QThread):
@@ -18,12 +17,12 @@ class FlaskWork(QThread):
         self.flask_service = FlaskServer()
         self.signals = FlaskSignals()
         self._is_running = True
-        
-        # 转发Flask服务的信号到主线程
+
+        # 转发Flask服务的信号到主线程（单一 execute_script_request 通道，携带 LaunchContext）
         self.flask_service.signals.show_notify.connect(self.signals.show_notify)
         self.flask_service.signals.execute_script_request.connect(self.execute_script_handler)
         self.flask_service.signals.execute_script_request.connect(
-            lambda sid, jp: self.signals.execute_script_request.emit(sid, jp))
+            lambda ctx: self.signals.execute_script_request.emit(ctx))
 
     def run(self):
         """在线程中运行Flask服务器"""
@@ -46,20 +45,17 @@ class FlaskWork(QThread):
             self.terminate()  # 强制终止
             self.wait()
 
-    def execute_script_handler(self, script_id, json_path):
-        """处理脚本执行请求 - 避免阻塞Flask线程"""
-        from app.data import ProjectGlobal
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            if script_id in ProjectGlobal.RUNNING_SCRIPTS:
-                self.signals.show_notify.emit(('warning', f'脚本正在运行中，请等待完成', 3000, False))
-                return
+    def execute_script_handler(self, ctx):
+        """处理脚本执行请求 - 避免阻塞Flask线程（占用已在路由/弹窗线程完成）"""
+        if ctx is None:
+            return
         try:
             # 发射开始通知
             self.signals.show_notify.emit(('info', '正在执行脚本', 2000, False))
-            # 在单独的线程或进程池中执行耗时脚本
+            # 在单独的线程中执行耗时脚本
             thread = threading.Thread(
                 target=self._execute_script_in_thread,
-                args=(script_id, json_path)
+                args=(ctx,)
             )
             thread.daemon = True  # 设置为守护线程
             thread.start()
@@ -67,18 +63,15 @@ class FlaskWork(QThread):
         except Exception as e:
             BM_LOG.error(f"{e}")
 
-    def _execute_script_in_thread(self, script_id, json_path):
-        """在单独的线程中执行脚本"""
-        from app.data import ProjectGlobal
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            ProjectGlobal.RUNNING_SCRIPTS.add(script_id)
+    def _execute_script_in_thread(self, ctx):
+        """在单独的线程中执行脚本，结束时释放占用并清理参数文件"""
+        from app.servers.scripts import ScriptLaunchService
         try:
-            ScriptRunner().run_script(script_id, json_path)
+            ScriptLaunchService.run(ctx)
         except Exception as e:
             BM_LOG.error(f"启动脚本失败: {e}")
             self.signals.show_notify.emit(('error', '脚本执行失败，详细请看日志', 2000, False))
         finally:
-            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-                ProjectGlobal.RUNNING_SCRIPTS.discard(script_id)
+            ScriptLaunchService.cleanup(ctx)
 
 

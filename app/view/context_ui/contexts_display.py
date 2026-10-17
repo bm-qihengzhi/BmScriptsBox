@@ -97,13 +97,15 @@ class ContextWidget(QWidget):
                 elif key == "level":
                     text = level_map.get(item_data.get(key), tr('Unknown'))
                     item = QTableWidgetItem(text)
-                    item.setData(Qt.DisplayRole, item_data.get('level'))
+                    item.setData(Qt.UserRole, item_data.get('level'))
                     self.table_widget.setItem(row, col, item)
                 else:
                     val = str(item_data.get(key, ""))
                     item = QTableWidgetItem(val)
-                    if key == "name" and "iconPath" in item_data:
-                        item.setIcon(QIcon(item_data["iconPath"]))
+                    if key == "name":
+                        item.setData(Qt.UserRole, item_data.get("scriptId"))
+                        if "iconPath" in item_data:
+                            item.setIcon(QIcon(item_data["iconPath"]))
                     self.table_widget.setItem(row, col, item)
 
     def _add_switch_cell(self, row: int, col: int, data: dict):
@@ -126,37 +128,41 @@ class ContextWidget(QWidget):
         name_item = self.table_widget.item(row, 0)
         if not name_item:
             return None
-        return {'name': name_item.text(), 'row': row}
+        return {
+            'name': name_item.text(),
+            'row': row,
+            'scriptId': name_item.data(Qt.UserRole),
+        }
 
     def _on_show_context_menu(self, pos, row_data: dict):
         menu = XMenu(parent=self)
+        script_id = row_data.get('scriptId')
         row = row_data.get('row', 0)
 
         menu.add_action(
             text=tr("Move Up"),
             icon=XIcon.get(name=IconName.UP_ARROW, color=XColor.TERTIARY).icon(),
-            triggered=lambda: self.presenter.on_move_up(row),
+            triggered=lambda: self.presenter.on_move_up(script_id),
         )
         menu.add_action(
             text=tr('Move Down'),
             icon=XIcon.get(name=IconName.DOWN_ARROW, color=XColor.TERTIARY).icon(),
-            triggered=lambda: self.presenter.on_move_down(row),
+            triggered=lambda: self.presenter.on_move_down(script_id),
         )
 
-        row = row_data.get('row')
         item = self.table_widget.item(row, 2)
-        level = item.data(Qt.DisplayRole)
+        level = item.data(Qt.UserRole) if item else 2
         if level == 1:
             menu.add_action(
                 text=tr('Move to Level 2'),
                 icon=XIcon.get(name=IconName.DOWN_DOUBLE, color=XColor.TERTIARY).icon(),
-                triggered=lambda: self.presenter.on_change_level(row, 2)
+                triggered=lambda: self.presenter.on_change_level(script_id, 2)
             )
         else:
             menu.add_action(
                 text=tr('Move to Level 1'),
                 icon=XIcon.get(name=IconName.UP_DOUBLE, color=XColor.TERTIARY).icon(),
-                triggered=lambda: self.presenter.on_change_level(row, 1)
+                triggered=lambda: self.presenter.on_change_level(script_id, 1)
             )
 
         menu.exec_(self.table_widget.viewport().mapToGlobal(pos))

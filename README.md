@@ -25,7 +25,7 @@
 
 ## 简介
 
-不忙脚本盒子是一款面向 Windows 的跨语言脚本管理器，支持 Python、Node.js、PowerShell、BAT、AutoHotkey、HTML、EXE 七种脚本形态。它把环境配置的负担从使用者转移到工具本身，为脚本提供统一的图形界面与快捷启动方式——让普通用户也能轻松用脚本提升工作效率，让开发者专注写脚本本身
+不忙脚本盒子是一款面向 Windows 的跨语言脚本管理与启动软件。它为脚本提供统一的可视化管理窗口，支持为脚本自动部署环境依赖，并提供便捷的启动方式。既能为命令行脚本渲染图形化启动窗口，也支持定时执行。内置脚本库，用户可一键安装脚本。目前支持 Python、Node.js、PowerShell、BAT、AutoHotkey、HTML、EXE 七种脚本形态。
 
 ![不忙脚本盒子](./app/resources/imgs/bmscriptsbox.webp)
 

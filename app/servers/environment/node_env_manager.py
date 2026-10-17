@@ -145,6 +145,7 @@ class NodeEnvManager(QObject):
             if time.time() - _wait_start > timeout:
                 process.kill()
                 raise RuntimeError(f"依赖安装超时（{timeout}秒）")
+            time.sleep(0.05)
 
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)

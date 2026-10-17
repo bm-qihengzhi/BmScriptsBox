@@ -53,7 +53,8 @@ class WorkerManager(QObject):
 
         self.http_work = FlaskWork()
         self.http_work.signals.show_notify.connect(self._on_notify)
-        self.http_work.signals.execute_script_request.connect(lambda sid, jp: self.context_menu_triggered.emit(sid,jp))
+        self.http_work.signals.execute_script_request.connect(
+            lambda ctx: self.context_menu_triggered.emit(ctx.script_id, ctx.json_path))
         self.http_work.start()
 
         try:

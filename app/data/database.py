@@ -5,14 +5,33 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 
+import functools
 import json
+import time
 from datetime import datetime
 from typing import  Any, List, Optional
 
 from app.data.toml_schemas import ScriptTomlConfig, TriggersConfig
 from playhouse.shortcuts import model_to_dict
+from peewee import OperationalError
 from .model import db, Script, Config, Task, TaskRun, ScriptParamMemory, ensure_tables
 from .schemas import ScriptEntity
+
+
+def _retry_on_lock(times: int = 3, base_delay: float = 0.2):
+    """SQLite 写并发偶发 'database is locked' 时的退避重试（busy_timeout 之外的最后一道保险）"""
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            for attempt in range(times):
+                try:
+                    return fn(*args, **kwargs)
+                except OperationalError as e:
+                    if 'locked' not in str(e).lower() or attempt == times - 1:
+                        raise
+                    time.sleep(base_delay * (attempt + 1))
+        return wrapper
+    return deco
 
 
 class ScriptDatabase:
@@ -46,6 +65,7 @@ class ScriptDatabase:
         return data
 
     @staticmethod
+    @_retry_on_lock()
     def insert_or_update(script_info: dict):
         """插入或更新脚本 (适配最新字段名)"""
         ensure_tables()
@@ -114,10 +134,13 @@ class ScriptDatabase:
             # 3. 校验并转换为 Pydantic 模型
             return ScriptEntity.model_validate(parsed_data)
         except Exception as e:
+            from app.utils import BM_LOG
+            BM_LOG.warning(f"获取脚本详情失败 {script_id}: {e}")
             return None
 
 
     @staticmethod
+    @_retry_on_lock()
     def update_status(script_id: str, field: str, value: Any):
         """通用的状态修改方法 (修改 pin, hotkey_active 等)"""
         ensure_tables()
@@ -131,6 +154,7 @@ class ScriptDatabase:
             Script.update(hotkey_active=False).where(Script.id == script_id).execute()
 
     @staticmethod
+    @_retry_on_lock()
     def update_run_stats(script_id: str):
         """更新运行次数和最后运行时间"""
         ensure_tables()
@@ -158,6 +182,16 @@ class ScriptDatabase:
         runtime = config.runtime
         triggers = config.triggers or TriggersConfig()
 
+        # 热键唯一性防御：被其它脚本占用时忽略本脚本声明，避免安装因 IntegrityError 失败
+        hotkey_value = triggers.shortcut.hotkey if hasattr(triggers.shortcut, 'hotkey') else None
+        if hotkey_value:
+            holder = Script.get_or_none(Script.hotkey == hotkey_value)
+            if holder and str(holder.id) != str(info.id):
+                from app.utils import BM_LOG
+                BM_LOG.warning(
+                    f"热键 {hotkey_value} 已被脚本 {holder.id} 占用，忽略脚本 {info.id} 的热键声明")
+                hotkey_value = None
+
         # 2. 构造入库字典
         data = {
             'id': str(info.id),  # UUID 转字符串存入数据库
@@ -172,7 +206,7 @@ class ScriptDatabase:
             'entry': runtime.entry,
             'terminal': runtime.terminal,
             # Pydantic 对象转 JSON 字符串
-            'binaries': json.dumps(runtime.binaries),
+            'binaries': json.dumps([b.model_dump() for b in (runtime.binaries or [])]),
 
             'inputs_schema': json.dumps([i.model_dump() for i in config.inputs]),
             'outputs_schema': json.dumps([o.model_dump() for o in config.outputs]),
@@ -187,15 +221,45 @@ class ScriptDatabase:
             'triggers_schema': json.dumps(triggers.model_dump()),
 
             # 冗余字段用于快速查询
-            'hotkey': triggers.shortcut.hotkey if hasattr(triggers.shortcut, 'hotkey') else None,
+            'hotkey': hotkey_value,
             'hotkey_active': triggers.shortcut.enabled,
             'quick_copy_active': triggers.quick_copy.enabled,
 
             'updated_at': datetime.now()
         }
 
-        # 3. 执行插入/更新
-        return Script.insert(data).on_conflict_replace().execute()
+        # 3. 执行插入/更新（保留用户状态：pin / created_at / run_count / last_run_at 不覆盖）
+        update_fields = {
+            k: v for k, v in data.items()
+            if k not in ('pin', 'created_at', 'run_count', 'last_run_at')
+        }
+        return (Script.insert(data)
+                .on_conflict(conflict_target=[Script.id], update=update_fields)
+                .execute())
+
+    @staticmethod
+    def get_raw_row(script_id: str) -> Optional[dict]:
+        """获取脚本原始数据库行（dict，含 pin/统计等全部字段），供回滚还原用"""
+        ensure_tables()
+        try:
+            script = Script.get_or_none(Script.id == script_id)
+            if not script:
+                return None
+            return model_to_dict(script)
+        except Exception as e:
+            from app.utils import BM_LOG
+            BM_LOG.warning(f"获取脚本原始行失败 {script_id}: {e}")
+            return None
+
+    @staticmethod
+    @_retry_on_lock()
+    def restore_row(data: dict):
+        """按原始行整体还原脚本记录（回滚用，保留 pin/统计等全部字段）"""
+        if not data:
+            return False
+        ensure_tables()
+        Script.insert(data).on_conflict_replace().execute()
+        return True
 
     @staticmethod
     def get_param_memory(script_id: str) -> dict:
@@ -211,6 +275,7 @@ class ScriptDatabase:
             return {}
 
     @staticmethod
+    @_retry_on_lock()
     def save_param_memory(script_id: str, params: dict):
         """保存脚本参数表单的记忆值（参数确认运行后）"""
         ensure_tables()
@@ -404,6 +469,7 @@ class TaskDatabase:
         return TaskDatabase._task_to_dict(task)
 
     @staticmethod
+    @_retry_on_lock()
     def increment_executed_count(task_id: int):
         """已执行次数 +1（间隔类任务计数）"""
         ensure_tables()
@@ -433,6 +499,7 @@ class TaskDatabase:
         return data
 
     @staticmethod
+    @_retry_on_lock()
     def record_task_run(task_id, script_id, status, code=None, msg=None, duration_ms=None) -> TaskRun:
         """写入一条定时任务历史执行记录（只记 code+msg，业务键不落库）"""
         ensure_tables()

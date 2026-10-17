@@ -283,10 +283,10 @@ class ScheduledSetWidget(XDialog):
 
     def update_task_name(self):
         """更新脚本名称列表"""
-        if not ProjectGlobal.SCRIPTS:
-            ProjectGlobal.SCRIPTS = ScriptDatabase.get_all_scripts()
-
-        scripts = ProjectGlobal.SCRIPTS
+        scripts = ProjectGlobal.safe_get('SCRIPTS')
+        if not scripts:
+            scripts = ScriptDatabase.get_all_scripts()
+            ProjectGlobal.safe_set('SCRIPTS', scripts)
         data = []
         for script in scripts:
             self.scripts_model[script.name] = {

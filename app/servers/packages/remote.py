@@ -47,11 +47,20 @@ class RemoteManifestProvider:
         """手动清空所有缓存"""
         self._cache.clear()
 
-    def _fetch_json(self, url: str) -> Dict:
-        """发起一次 JSON 请求，失败抛出异常"""
-        response = self._session.get(url, headers=self._get_random_headers(), timeout=(5, 20))
-        response.raise_for_status()
-        return response.json()
+    def _fetch_json(self, url: str, retries: int = 3) -> Dict:
+        """发起一次 JSON 请求（带指数退避重试），失败抛出异常"""
+        last_exc = None
+        for attempt in range(retries):
+            try:
+                response = self._session.get(
+                    url, headers=self._get_random_headers(), timeout=(5, 20))
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                last_exc = e
+                if attempt < retries - 1:
+                    time.sleep(0.5 * (attempt + 1))
+        raise last_exc
 
     def get_package_manifest(self, file_name: str) -> Dict:
         """

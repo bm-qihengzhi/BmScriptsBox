@@ -209,7 +209,7 @@ class MainView(XWidget):
         self.tray.activated.connect(self.presenter.on_tray_activated)
         self.tray.show()
         if self._tray_started:
-            BmNotify().show_success_notify('不忙脚本盒子已启动在系统托盘', duration=3000, show_close=False)
+            BmNotify().show_success_notify(tr('不忙脚本盒子已启动在系统托盘'), duration=3000, show_close=False)
 
 
 
@@ -389,6 +389,8 @@ class MainView(XWidget):
         self.hide()
         if hasattr(self, 'tray'):
             self.tray.hide()
+        if hasattr(self, 'scripts_widget'):
+            self.scripts_widget.presenter.shutdown()
         self.presenter.shutdown()
         if self.scheduled_widget:
             self.scheduled_widget.presenter.scheduled_work.stop()

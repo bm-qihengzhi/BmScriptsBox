@@ -8,6 +8,7 @@ import json
 import webbrowser
 
 from PySide2.QtCore import Signal, QObject
+from xsideui import tr
 from app.utils import BmNotify, BmTools, BM_LOG
 
 
@@ -17,6 +18,7 @@ class ScriptPresenter(QObject):
     scripts_loaded = Signal(list)
     banner_loaded = Signal(list)
     banner_clicked = Signal(str)
+    show_window = Signal()
 
     def __init__(self):
         super().__init__()
@@ -26,7 +28,10 @@ class ScriptPresenter(QObject):
         self._read_threads = set()
 
     def lazy_loading(self):
-        self._load_banner()
+        try:
+            self._load_banner()
+        except Exception as e:
+            BM_LOG.error(f"加载 banner 失败: {e}")
         self._load_scripts()
 
     def _load_banner(self):
@@ -42,7 +47,8 @@ class ScriptPresenter(QObject):
                     banner_list.append(str(resources_path / "banner_images" / item["img"]))
                 self.banner_loaded.emit(banner_list)
         except Exception as e:
-            raise Exception(f"添加banner图片失败: {e}")
+            BM_LOG.warning(f"添加banner图片失败: {e}")
+            return
 
     def _load_scripts(self):
         from app.works.script_work import ReadScriptsThread
@@ -67,7 +73,10 @@ class ScriptPresenter(QObject):
     def on_banner_clicked(self, index):
         if not self.banner_data:
             return
-        link = self.banner_data.get("banners", [{}])[index].get("link")
+        banners = self.banner_data.get("banners", [])
+        if not (0 <= index < len(banners)):
+            return
+        link = banners[index].get("link")
         if link:
             webbrowser.open_new_tab(link)
             self.banner_clicked.emit(link)
@@ -75,49 +84,45 @@ class ScriptPresenter(QObject):
     def refresh_scripts(self):
         self._load_scripts()
 
+    def shutdown(self):
+        """退出前等待在读库线程结束，避免 QThread 在运行中被销毁"""
+        for thread in list(self._read_threads):
+            if thread.isRunning():
+                thread.wait(2000)
+        self._read_threads.clear()
+
     def _on_uninstall_script(self, data):
         if data.get('state'):
             self.refresh_scripts()
-            BmNotify().show_success_notify(content='卸载完成', in_window=True)
+            BmNotify().show_success_notify(content=tr('卸载完成'), in_window=True)
             return
         else:
-            BmNotify().show_error_notify(content='卸载失败', in_window=True)
+            BmNotify().show_error_notify(content=tr('卸载失败'), in_window=True)
             return
 
     def execute_script(self, script_id):
-        from app.data import ProjectGlobal, ScriptDatabase
-        entity = ScriptDatabase.get_script_by_id(script_id)
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            if script_id in ProjectGlobal.RUNNING_SCRIPTS:
-                BM_LOG.warning(f"脚本 {script_id} 正在执行中，跳过重复触发")
-                name = entity.name if entity else script_id
-                BmNotify().show_warning_notify(f"脚本「{name}」正在运行中，请等待完成")
-                return
+        from app.servers.scripts import (
+            ScriptLaunchService, ScriptBusyError, ScriptNotFoundError)
         from app.works.script_work import ExecuteScriptWork
-        from app.utils import ParameterManager
-        from app.utils.parameter_generate import build_launch_env
 
-        script_args = ''
-        if entity:
-            if getattr(entity, 'params_form_enabled', False):
-                from app.view.script_ui.params_prompt import show_params_prompt
-                res = show_params_prompt(entity, [])  # 卡片运行：无预填数据，用户自填
-                if res is None:  # 取消则不启动
-                    return
-                data_list, params_overrides = res
-                params_defs = entity.params_schema
-            else:
-                # 普通卡片运行：data、params 均为空，仅注入 environment（脚本可作联动发起方）
-                data_list, params_overrides, params_defs = [], {}, []
-            input_data = entity.inputs_schema[0] if entity.inputs_schema else {}
-            json_path = ParameterManager().construct_parameters(
-                input_data, data_list,
-                params_defs=params_defs,
-                params_overrides=params_overrides,
-                env_extra=build_launch_env(script_id),
-            )
-            script_args = str(json_path) if json_path else ''
-        worker = ExecuteScriptWork(script_id, script_args=script_args)
+        try:
+            ctx = ScriptLaunchService.prepare(
+                script_id, invoke_mode='manual', allow_params_form=True,
+                reserve_first=True, source='card')
+        except ScriptBusyError:
+            BM_LOG.warning(f"脚本 {script_id} 正在执行中，跳过重复触发")
+            BmNotify().show_warning_notify("脚本正在运行中，请等待完成")
+            self.show_window.emit()
+            return
+        except ScriptNotFoundError as e:
+            BmNotify().show_error_notify(content=str(e))
+            self.show_window.emit()
+            return
+        if ctx is None:  # 参数表单被取消
+            self.show_window.emit()
+            return
+
+        worker = ExecuteScriptWork(ctx)
         worker.execute_signal.connect(self._on_executed)
         worker.finished.connect(lambda sid=script_id: self._execute_workers.pop(sid, None))
         self._execute_workers[script_id] = worker
@@ -134,6 +139,10 @@ class ScriptPresenter(QObject):
         self._uninstall_workers[script_id] = worker
         worker.start()
 
-    def _on_executed(self,state):
-        BmNotify().show_info_notify(content='正在执行脚本')
+    def _on_executed(self, state):
+        if state:
+            BmNotify().show_info_notify(content=tr('正在执行脚本'))
+        else:
+            BmNotify().show_error_notify(content=tr('脚本执行失败，详细请看日志'))
+            self.show_window.emit()
 

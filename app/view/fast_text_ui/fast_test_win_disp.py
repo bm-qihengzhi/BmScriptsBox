@@ -56,12 +56,12 @@ class FastTextWidget(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         # 延迟显示数据
-        QTimer.singleShot(100, lambda: self.update_table(ProjectGlobal.SCRIPTS))
+        QTimer.singleShot(100, lambda: self.update_table(ProjectGlobal.safe_get('SCRIPTS')))
 
     def filter_scripts(self):
         """搜索脚本"""
         search_text = self.search_bar.text().strip().lower()
-        all_scripts = ProjectGlobal.SCRIPTS or []
+        all_scripts = ProjectGlobal.safe_get('SCRIPTS') or []
         filtered_scripts = []
         if not search_text:
             filtered_scripts = all_scripts
@@ -104,7 +104,7 @@ class FastTextWidget(QWidget):
     def _switch_script_active(self, sid, checked):
         """切换脚本显示状态"""
         ScriptDatabase().update_status(sid, 'quick_copy_active', checked)
-        ProjectGlobal.SCRIPTS = ScriptDatabase().get_all_scripts()
+        ProjectGlobal.safe_set('SCRIPTS', ScriptDatabase().get_all_scripts())
 
     def _show_context_menu(self, pos):
         """显示右键菜单"""
@@ -138,7 +138,7 @@ class FastTextWidget(QWidget):
 
     def get_data(self, db_id):
         """获取任务数据"""
-        for value in ProjectGlobal.SCRIPTS:
+        for value in (ProjectGlobal.safe_get('SCRIPTS') or []):
             if value.id == db_id:
                 return value
         return None
@@ -146,14 +146,16 @@ class FastTextWidget(QWidget):
     def _script_top(self, script_data):
         """添加脚本置顶"""
         ScriptDatabase().update_status(script_data.id, 'pin', True)
-        ProjectGlobal.SCRIPTS = ScriptDatabase().get_all_scripts()
-        self.update_table(ProjectGlobal.SCRIPTS)
+        scripts = ScriptDatabase().get_all_scripts()
+        ProjectGlobal.safe_set('SCRIPTS', scripts)
+        self.update_table(scripts)
 
     def _script_cancel_top(self, script_data):
         """取消脚本置顶"""
         ScriptDatabase().update_status(script_data.id, 'pin', False)
-        ProjectGlobal.SCRIPTS = ScriptDatabase().get_all_scripts()
-        self.update_table(ProjectGlobal.SCRIPTS)
+        scripts = ScriptDatabase().get_all_scripts()
+        ProjectGlobal.safe_set('SCRIPTS', scripts)
+        self.update_table(scripts)
 
 
 if __name__ == '__main__':

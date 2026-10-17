@@ -21,9 +21,10 @@ class HotkeyModel:
 
     def load_scripts(self) -> List[ScriptEntity]:
         """加载所有支持热键排序后的脚本"""
-        ProjectGlobal.SCRIPTS = self.db.get_all_scripts()
+        scripts = self.db.get_all_scripts()
+        ProjectGlobal.safe_set('SCRIPTS', scripts)
         return sorted(
-            [s for s in ProjectGlobal.SCRIPTS if s and s.triggers_schema['shortcut'].get('enabled')],
+            [s for s in scripts if s and s.triggers_schema['shortcut'].get('enabled')],
             key=lambda s: s.hotkey or '',
             reverse=True  # True 排在前面
         )

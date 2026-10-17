@@ -96,25 +96,53 @@ class TomlManager:
     def read_toml_id_from_zip(self, zip_path):
         """从压缩包的bm-scripts-box-rc.toml中读取脚本ID"""
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            toml_file = next((f for f in zf.namelist() if f.endswith('bm-scripts-box-rc.toml')), None)
-            if toml_file:
-                toml_content = zf.read(toml_file).decode('utf-8')
-                data = toml.loads(toml_content)
-                return data['bmscriptsbox']['info']['id']
-            else:
-                raise FileNotFoundError("脚本压缩包内无配置文件bm-scripts-box-rc.toml")
+            toml_file = self._pick_toml_from_zip(zf.namelist())
+            toml_content = zf.read(toml_file).decode('utf-8')
+            data = toml.loads(toml_content)
+            return data['bmscriptsbox']['info']['id']
+
+    TOML_FILENAME = 'bm-scripts-box-rc.toml'
+
+    @classmethod
+    def _pick_toml_from_zip(cls, names: list) -> str:
+        """从 zip 条目名中选取配置文件：取层级最浅者；同层级出现多个则报错。"""
+        matches = [n for n in names
+                   if n.endswith(cls.TOML_FILENAME) and not n.endswith('/')]
+        if not matches:
+            raise FileNotFoundError("脚本压缩包内无配置文件bm-scripts-box-rc.toml")
+        matches.sort(key=lambda n: (n.count('/'), len(n)))
+        top_depth = matches[0].count('/')
+        same_depth = [n for n in matches if n.count('/') == top_depth]
+        if len(same_depth) > 1:
+            raise ValueError(
+                f"压缩包内存在多个 {cls.TOML_FILENAME}，无法确定配置文件: {same_depth[:5]}")
+        return matches[0]
+
+    def find_toml_file(self, script_dir):
+        """定位目录下的脚本配置文件：取层级最浅者；同层级出现多个则报错。"""
+        script_path = Path(script_dir)
+        files = list(script_path.rglob(self.TOML_FILENAME))
+        if not files:
+            raise FileNotFoundError(f"目录下找不到 {self.TOML_FILENAME} 配置文件")
+        files.sort(key=lambda p: (len(p.relative_to(script_path).parts), str(p)))
+        top_depth = len(files[0].relative_to(script_path).parts)
+        same_depth = [p for p in files
+                      if len(p.relative_to(script_path).parts) == top_depth]
+        if len(same_depth) > 1:
+            raise ValueError(
+                f"目录下存在多个 {self.TOML_FILENAME}，无法确定配置文件: "
+                f"{[str(p) for p in same_depth[:5]]}")
+        return files[0]
 
 
     def read_toml_from_dir(self, script_dir: str) -> ScriptLoadResult:
         """读取文件夹下toml配置文件、用于云端按照"""
         try:
             script_path = Path(script_dir)
-            # 寻找配置文件
-            toml_files = list(script_path.rglob('bm-scripts-box-rc.toml'))
-            if not toml_files:
-                return ScriptLoadResult(success=False, error_messages=["目录下找不到 bm-scripts-box-rc.toml 配置文件"])
-
-            toml_file = toml_files[0]
+            try:
+                toml_file = self.find_toml_file(script_path)
+            except (FileNotFoundError, ValueError) as e:
+                return ScriptLoadResult(success=False, error_messages=[str(e)])
             with open(toml_file, 'r', encoding='utf-8') as f:
                 data = toml.load(f)
 

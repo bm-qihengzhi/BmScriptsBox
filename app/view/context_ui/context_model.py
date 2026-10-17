@@ -4,11 +4,13 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
+import copy
+import os
 from typing import Dict, List
 
 from app.data import ProjectGlobal
-from app.utils import BM_LOG
 from app.servers.context import ContextManager
+from app.utils import BmTools
 
 
 class ContextModel:
@@ -25,99 +27,49 @@ class ContextModel:
         return ProjectGlobal.MENU
 
     def get_menu_data_by_target(self, target: str) -> List[Dict]:
-        """根据目标类型获取菜单数据"""
+        """根据目标类型获取菜单数据（返回深拷贝，避免视图误改内存树）"""
         menu_data = []
-        for parent_menu in ProjectGlobal.MENU.get('menuItems', []):
-            if target in parent_menu.get('target', []):
-                if not parent_menu.get('submenu') and parent_menu.get('name') != '不忙脚本盒子':
-                    menu_data.append(parent_menu)
-                else:
-                    menu_data.extend(parent_menu.get('submenu', []))
-        return menu_data
+        for menu in ProjectGlobal.MENU.get('menuItems', []):
+            if menu.get('name') == '不忙脚本盒子':
+                for child in menu.get('submenu', []) or []:
+                    if target in (child.get('target', []) or []):
+                        menu_data.append(child)
+            elif (target in (menu.get('target', []) or [])
+                  and 'scriptId' in menu and not menu.get('submenu')):
+                menu_data.append(menu)
 
-    def modify_menu_status(self, script_id: str, status: bool) -> None:
+        result = copy.deepcopy(menu_data)
+        for item in result:
+            item['iconPath'] = self._resolve_icon_path(item.get('iconPath'))
+        return result
+
+    @staticmethod
+    def _resolve_icon_path(icon_path: str) -> str:
+        """相对路径以 BmContext 目录为基准解析为绝对路径（DLL 同规则），供 QIcon 使用"""
+        if not icon_path or os.path.isabs(icon_path):
+            return icon_path
+        base = BmTools.get_root_path() / "BmContext"
+        return os.path.normpath(os.path.join(str(base), icon_path))
+
+    def modify_menu_status(self, script_id: str, status: bool, target: str = None) -> None:
         """修改菜单状态"""
-        self.menu_manager.modify_menu_status(script_id, status)
+        self.menu_manager.modify_menu_status(script_id, status, target)
+        self.load_menu_data()
 
-    def move_menu_item(self, current_index: int, direction: str, target: str) -> bool:
-        """移动菜单项"""
-        menu_data = self.get_menu_data_by_target(target)
+    def move_menu_item(self, script_id: str, direction: str, target: str) -> str:
+        """移动菜单项，返回 ok | first | last | boundary | not_found"""
+        result = self.menu_manager.move_menu_item(script_id, direction, target)
+        if result == 'ok':
+            self.load_menu_data()
+        return result
 
-        if direction == 'up' and current_index > 0:
-            menu_data[current_index], menu_data[current_index - 1] = menu_data[current_index - 1], menu_data[current_index]
-        elif direction == 'down' and current_index < len(menu_data) - 1:
-            menu_data[current_index], menu_data[current_index + 1] = menu_data[current_index + 1], menu_data[current_index]
-        else:
-            return False
-
-        return self._update_menu_config(menu_data, target)
-
-    def change_menu_level(self, current_index: int, new_level: int, target: str) -> bool:
+    def change_menu_level(self, script_id: str, new_level: int, target: str) -> bool:
         """改变菜单级别"""
-        menu_data = self.get_menu_data_by_target(target)
-        data = menu_data[current_index]
-
-        data['level'] = new_level
-        if new_level == 1:
-            data['father'] = "无"
-        else:
-            data['father'] = "不忙脚本盒子"
-            if 'target' not in data:
-                data['target'] = [target]
-
-        return self._update_menu_config(menu_data, target)
-
-    def search_menu_items(self, target: str, search_text: str) -> List[Dict]:
-        """搜索菜单项"""
-        menu_data = self.get_menu_data_by_target(target)
-        if not search_text:
-            return menu_data
-        return [item for item in menu_data if search_text.lower() in item['name'].lower()]
+        success = self.menu_manager.change_menu_level(script_id, new_level, target)
+        if success:
+            self.load_menu_data()
+        return success
 
     def get_target_by_index(self, index: int) -> str:
         """根据索引获取目标类型"""
         return self.index_map.get(index, 'files')
-
-    def _update_menu_config(self, updated_data: List[Dict], target: str) -> bool:
-        """更新菜单配置"""
-        try:
-            all_menus = ProjectGlobal.MENU.get("menuItems", [])
-            promoted_ids = {item.get('scriptId') for item in updated_data if item.get('level') == 1}
-            new_menus = []
-
-            for menu in all_menus:
-                if menu.get('name') == '不忙脚本盒子':
-                    if promoted_ids:
-                        sub = menu.get("submenu", [])
-                        menu["submenu"] = [x for x in sub if x.get('scriptId') not in promoted_ids]
-                    new_menus.append(menu)
-                elif target in menu.get("target", []):
-                    if menu.get('level') == 1:
-                        for updated_item in updated_data:
-                            if (updated_item.get('name') == menu.get('name') and
-                                updated_item.get('level') == 1 and
-                                target in updated_item.get("target", [])):
-                                menu.update(updated_item)
-                                new_menus.append(menu)
-                                break
-                        else:
-                            new_menus.append(menu)
-                    else:
-                        new_menus.append(menu)
-                else:
-                    new_menus.append(menu)
-
-            for updated_item in updated_data:
-                if (updated_item.get('level') == 1 and
-                    target in updated_item.get("target", []) and
-                    updated_item.get('name') != '不忙脚本盒子'):
-                    exists = any(m.get('name') == updated_item.get('name') and target in m.get("target", []) and m.get('level') == 1 for m in new_menus)
-                    if not exists:
-                        new_menus.append(updated_item)
-
-            ProjectGlobal.MENU["menuItems"] = new_menus
-            self.menu_manager.save_config(ProjectGlobal.MENU)
-            return True
-        except Exception as e:
-            BM_LOG.error(f"更新菜单配置失败: {e}")
-            return False

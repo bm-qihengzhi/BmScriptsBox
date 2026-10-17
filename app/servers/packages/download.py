@@ -269,6 +269,15 @@ class XDownLoad(QObject):
         return f"{size / 1024 / 1024:.1f}MB"
 
     @staticmethod
+    def verify_sha256(path, expected: str) -> bool:
+        """校验文件 sha256（十六进制、大小写不敏感）；异常一律视为不通过"""
+        from app.servers.packages.integrity import sha256_file
+        try:
+            return sha256_file(path).lower() == (expected or '').strip().lower()
+        except Exception:
+            return False
+
+    @staticmethod
     def _artifact_complete(save_path: Path, done_bytes: int) -> bool:
         """
         校验 MUDL 退出码异常时产物是否其实已完整。

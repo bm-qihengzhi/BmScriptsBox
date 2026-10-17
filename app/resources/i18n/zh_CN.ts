@@ -1032,5 +1032,36 @@
         <source>Resource Cleanup</source>
         <translation>无用资源清理</translation>
     </message>
+    <message>
+        <location filename="view/script_ui/binary_consent_dialog.py" line="75"/>
+        <source>The script requests to download and deploy an external executable.</source>
+        <translation>此脚本依赖一个外部可执行文件，需下载后才能运行。</translation>
+    </message>
+    <message>
+        <location filename="view/script_ui/binary_consent_dialog.py" line="75"/>
+        <source>Please confirm the source is trustworthy before allowing.</source>
+        <translation>点击“允许”后将开始下载，请先确认来源是否可信</translation>
+    </message>
+    <message>
+        <location filename="view/script_ui/binary_consent_dialog.py" line="75"/>
+        <source>Reject</source>
+        <translation>拒绝</translation>
+    </message>
+    <message>
+        <location filename="view/script_ui/binary_consent_dialog.py" line="75"/>
+        <source>Allow Once</source>
+        <translation>允许一次</translation>
+    </message>
+    <message>
+        <location filename="view/script_ui/binary_consent_dialog.py" line="75"/>
+        <source>Allow and Remember</source>
+        <translation>允许并记住</translation>
+    </message>
+    <message>
+        <location filename="view/script_ui/binary_consent_dialog.py" line="75"/>
+        <source>External Binary Download</source>
+        <translation>文件下载提示</translation>
+    </message>
+
 </context>
 </TS>

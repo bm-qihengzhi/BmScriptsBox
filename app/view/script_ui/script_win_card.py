@@ -37,10 +37,31 @@ class ScriptCard(XCard):
         super().__init__()
         self.set_clickable(True)
         self.script_info = script_info
+        self._icon_source = None
         self._pin_label = None
         self._badge_label = None
         self._setup_ui()
         self._setup_badges()
+
+    def update_data(self, script_info):
+        """就地更新卡片数据（复用卡片实例，避免整表重建导致图标重载）"""
+        old = self.script_info
+        if (old.id, old.name, old.icon, old.badge, old.pin, old.version) == \
+                (script_info.id, script_info.name, script_info.icon,
+                 script_info.badge, script_info.pin, script_info.version):
+            return
+        name_changed = old.name != script_info.name
+        self.script_info = script_info
+
+        icon = script_info.icon or BmTools.get_language_icon_path(script_info.language)
+        if icon != self._icon_source:
+            self._icon_source = icon
+            self.img.set_source(icon)
+
+        if name_changed:
+            self.title_label.setText(script_info.name)
+
+        self._refresh_badges()
 
     def sizeHint(self):
         # 根据父容器实际可用宽度自适应列数，卡片在该列数下铺满，避免临界宽度下挤成少列
@@ -71,6 +92,7 @@ class ScriptCard(XCard):
         self._layout.addWidget(context_widget)
         self._add_icon()
         self._add_central()
+        self.content_layout.addStretch()  # 前后各一个 stretch → icon/标题垂直居中
 
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._add_menu)
@@ -80,6 +102,7 @@ class ScriptCard(XCard):
         icon = self.script_info.icon
         if not icon:
             icon = BmTools.get_language_icon_path(self.script_info.language)
+        self._icon_source = icon
         self.img = XImage(source=icon, fit=XImage.FitMode.COVER, lazy=True, min_size=28)
 
         self.img.setContextMenuPolicy(Qt.NoContextMenu)  # 禁用右键菜单
@@ -100,6 +123,14 @@ class ScriptCard(XCard):
 
     def _setup_badges(self):
         """创建徽章子控件（随卡片裁剪，无浮动问题）"""
+        # 清除旧徽章，支持就地重建
+        if self._pin_label:
+            self._pin_label.deleteLater()
+            self._pin_label = None
+        if self._badge_label:
+            self._badge_label.deleteLater()
+            self._badge_label = None
+
         # 置顶图标
         if self.script_info.pin:
             pixmap = XIcon.get(name=IconName.PIN_FILL, color=XColor.TERTIARY, size=14).pixmap()
@@ -107,8 +138,7 @@ class ScriptCard(XCard):
             self._pin_label.setPixmap(pixmap)
             self._pin_label.setFixedSize(14, 14)
             self._pin_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        else:
-            self._pin_label = None
+            self._pin_label.show()  # 手动定位子控件：在已可见卡片上动态创建须显式 show
 
         # 文本徽章
         badge_text = self.script_info.badge
@@ -126,16 +156,23 @@ class ScriptCard(XCard):
             )
             self._badge_label.adjustSize()
             self._badge_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        else:
-            self._badge_label = None
+            self._badge_label.show()  # 同上：动态创建须显式 show
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+        self._position_badges()
+
+    def _refresh_badges(self):
+        """数据更新后刷新角标/徽章"""
+        self._setup_badges()
+
+    def _position_badges(self):
         if self._pin_label:
             self._pin_label.move(10, 10)
         if self._badge_label:
-            bw = self._badge_label.width()
-            self._badge_label.move(self.width() - bw - 0, 0)
+            self._badge_label.move(self.width() - self._badge_label.width() - 6, 6)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_badges()
 
     def _add_menu(self, pos):
         """
@@ -178,11 +215,10 @@ class ScriptCard(XCard):
         :return:
         """
         try:
-            is_top = self.script_info.pin
+            new_pin = not self.script_info.pin
             self.db = ScriptDatabase()
-            result = self.db.update_status(self.script_info.id, 'pin',not is_top)
-            if result:
-                self.script_info = result
+            self.db.update_status(self.script_info.id, 'pin', new_pin)
+            # 不再就地改 self.script_info：否则复用分支的 update_data 会误判为“无变化”而跳过角标刷新
             self.updated.emit({'state': True})
         except Exception as e:
             BM_LOG.error(f"设置脚本置顶失败: {e}")

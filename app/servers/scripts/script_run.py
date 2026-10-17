@@ -6,9 +6,8 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import itertools
 import json
-import locale
 import os
-import shlex
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,34 +21,67 @@ from app.utils import BM_LOG, BmTools
 from app.servers.packages import PackagesManager
 
 
+class ScriptNotFoundError(Exception):
+    """脚本不存在或已被卸载"""
+
+
 class ScriptRunner:
     """处理脚本执行的核心逻辑"""
 
     # 类级进程注册表 — 跨实例追踪所有正在运行的脚本进程（按自增键，避免同 id 并发覆盖）
-    _running_processes: Dict[int, subprocess.Popen] = {}
+    # 值升级为 (Popen, WinJob|None)，WinJob 用于关盒时连带结束子孙进程
+    _running_processes: Dict[int, Tuple[subprocess.Popen, object]] = {}
     _running_lock = threading.Lock()
     _proc_key_gen = itertools.count(1)
 
+    # 运行时 CLI 解析缓存：避免无 venv 脚本每次运行都触发 install_cli
+    _cli_cache: Dict[Tuple[str, str], str] = {}
+
+    # 允许清理的临时参数文件名（本盒生成的 UUID.json / bms_*.json）
+    _SAFE_TEMP_NAME = re.compile(r'^(bms_)?[0-9a-fA-F-]{8,}\.json$')
+
     @classmethod
-    def track_process(cls, process: subprocess.Popen, key: int = None):
+    def track_process(cls, process: subprocess.Popen, key: int = None, job=None):
         with cls._running_lock:
-            cls._running_processes[key if key is not None else next(cls._proc_key_gen)] = process
+            cls._running_processes[key if key is not None else next(cls._proc_key_gen)] = (process, job)
 
     @classmethod
     def untrack_process(cls, key: int):
+        # 仅移除登记，不关闭作业：脚本自行游离的子孙进程在会话期间继续存活，
+        # 统一在盒子关闭（terminate_all）时随全局作业一并结束。
         with cls._running_lock:
             cls._running_processes.pop(key, None)
 
     @classmethod
     def terminate_all(cls):
-        """强制终止所有正在运行的脚本进程"""
+        """强制终止所有正在运行的脚本进程（含孙进程）"""
         with cls._running_lock:
-            for sid, proc in cls._running_processes.items():
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+            entries = list(cls._running_processes.values())
             cls._running_processes.clear()
+        for process, job in entries:
+            try:
+                if job is None:
+                    process.kill()
+            except Exception:
+                pass
+        # 关闭会话级作业：连带结束其中残留的子孙进程
+        try:
+            from app.utils.win_job import close_global_job
+            close_global_job()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _make_job(process):
+        """把进程加入会话级作业；失败返回 None（terminate 时回退 proc.kill）"""
+        try:
+            from app.utils.win_job import get_global_job
+            job = get_global_job()
+            if job.assign(process):
+                return job
+        except Exception:
+            pass
+        return None
 
     # HTML 应用模式默认窗口尺寸
     HTML_WINDOW_WIDTH = 1000
@@ -74,6 +106,8 @@ class ScriptRunner:
         if not self.db:
             self.db = ScriptDatabase()
         results = self.db.get_script_by_id(script_id)
+        if results is None:
+            raise ScriptNotFoundError(f"脚本不存在或已被卸载: {script_id}")
         return (results.entry,
                 results.language,
                 results.language_version,
@@ -99,8 +133,9 @@ class ScriptRunner:
         cmd = config['cmd_gen'](str(script_path), version)
 
         # 4. 参数处理 (支持 JSON 路径或普通字符串)
+        # 契约规定唯一位置参数即 JSON 路径；按单参传递，避免含空格路径被拆散
         if param.strip() and lang != 'html':
-            cmd.extend(shlex.split(param, posix=False))
+            cmd.append(param)
 
         # 5. 执行并清理
         try:
@@ -117,17 +152,21 @@ class ScriptRunner:
 
         # 自动将运行时所在目录加入 PATH
         runtime_dir = str(Path(runtime_path).parent)
-        env['PATH'] = f"{runtime_dir}{os.pathsep}{env.get('PATH', '')}"
+        # 前置盒子二进制 shim 目录（外部二进制/直连二进制按命令名解析，last-wins）
+        shim_dir = str(BmTools.get_root_path() / 'BmPackages' / 'bin')
+        env['PATH'] = f"{shim_dir}{os.pathsep}{runtime_dir}{os.pathsep}{env.get('PATH', '')}"
 
         if lang == 'python':
             env.update({'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'})
         return env
 
     def _cleanup(self, param: str):
-        """统一清理逻辑：仅清理位于系统临时目录下的 JSON 临时文件"""
+        """统一清理逻辑：仅清理位于系统临时目录下、且由本盒命名的 JSON 临时文件"""
         try:
             path = Path(param)
             if not path.exists() or not path.is_file():
+                return
+            if not self._SAFE_TEMP_NAME.match(path.name):
                 return
             resolved = path.resolve()
             temp_root = Path(tempfile.gettempdir()).resolve()
@@ -136,7 +175,7 @@ class ScriptRunner:
                 in_temp = True
             except ValueError:
                 in_temp = False
-            if path.suffix == '.json' and in_temp:
+            if in_temp:
                 path.unlink()
                 BM_LOG.info(f"清理临时文件: {path}")
         except Exception:
@@ -160,130 +199,85 @@ class ScriptRunner:
         capture: 强制捕获 stdout/stderr 并返回（联动用）
         force_no_window: 强制不弹窗（联动用，覆盖 always/inverse）
         """
-        encoding = locale.getpreferredencoding(False)
         is_windows = (sys.platform == 'win32')
-
-        # 1. 核心标志位定义
         CREATE_NO_WINDOW = 0x08000000 if is_windows else 0
         CREATE_NEW_CONSOLE = 0x00000010 if is_windows else 0
+
+        has_data = (terminal_mode in ('auto', 'inverse')
+                    and self._param_has_data(params))
+
+        # 1. 解析管道与创建标志（四模式 + 联动覆盖统一到一处）
+        if force_no_window or capture:
+            # 模式 S: 联动覆盖 — 强制不弹窗，capture 时捕获输出
+            stdout = subprocess.PIPE if capture else subprocess.DEVNULL
+            stderr = subprocess.PIPE if capture else subprocess.DEVNULL
+            stdin = subprocess.DEVNULL
+            flags = CREATE_NO_WINDOW
+            want_capture = capture
+        elif terminal_mode == 'never':
+            # 模式 A: 绝不显示窗口 (静默执行)
+            stdout = stderr = stdin = subprocess.DEVNULL
+            flags = CREATE_NO_WINDOW
+            want_capture = False
+        elif terminal_mode == 'always':
+            # 模式 B: 始终显示新窗口 (交互模式)
+            stdout = stderr = stdin = None
+            flags = CREATE_NEW_CONSOLE
+            want_capture = False
+        elif terminal_mode == 'auto':
+            # 模式 C: 自动 (按 data 是否为空决定'静默捕获'还是'弹窗运行')
+            if has_data:
+                stdout = stderr = subprocess.PIPE
+                stdin = None
+                flags = CREATE_NO_WINDOW
+                want_capture = True
+            else:
+                stdout = stderr = stdin = None
+                flags = CREATE_NEW_CONSOLE
+                want_capture = False
+        elif terminal_mode == 'inverse':
+            # 模式 D: 与 auto 相反 -- 有数据弹窗，空数据静默
+            if has_data:
+                stdout = stderr = stdin = None
+                flags = CREATE_NEW_CONSOLE
+            else:
+                stdout = stderr = stdin = subprocess.DEVNULL
+                flags = CREATE_NO_WINDOW
+            want_capture = False
+        else:
+            raise ValueError(f'无效的终端模式: {terminal_mode}')
+
+        # 2. 统一启动 → 跟踪 → 等待/捕获 → 收尾（所有分支都保证 untrack）
         key = next(self._proc_key_gen)
         try:
-            # 模式 S: 联动覆盖 — 强制不弹窗，capture 时捕获输出
-            if force_no_window or capture:
-                stdout = subprocess.PIPE if capture else subprocess.DEVNULL
-                stderr = subprocess.PIPE if capture else subprocess.DEVNULL
-                process = subprocess.Popen(
-                    cmd, env=env,
-                    stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL,
-                    creationflags=CREATE_NO_WINDOW,
-                )
-                ScriptRunner.track_process(process, key)
-                try:
-                    if capture:
-                        stdout_bytes, stderr_bytes = process.communicate()
-                        out = self._smart_decode(stdout_bytes)
-                        err = self._smart_decode(stderr_bytes)
-                    else:
-                        process.wait()
-                        out = err = None
-                finally:
-                    ScriptRunner.untrack_process(key)
-                if capture and process.returncode != 0:
-                    raise RuntimeError(f'执行失败: {err}')
-                return True, out, err
-
-            # 模式 A: 绝不显示窗口 (静默执行)
-            if terminal_mode == 'never':
-                process = subprocess.Popen(
-                    cmd,
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    creationflags=CREATE_NO_WINDOW,
-
-                )
-                ScriptRunner.track_process(process, key)
-                process.wait()
-                ScriptRunner.untrack_process(key)
-                return True, None, None
-
-            # 模式 B: 始终显示新窗口 (交互模式)
-            elif terminal_mode == 'always':
-                process = subprocess.Popen(
-                    cmd,
-                    env=env,
-                    creationflags=CREATE_NEW_CONSOLE,
-                    encoding=encoding
-                )
-                ScriptRunner.track_process(process, key)
-                process.wait()
-                ScriptRunner.untrack_process(key)
-                return True, None, None
-
-            # 模式 C: 自动 (按 data 是否为空决定'静默捕获'还是'弹窗运行')
-            elif terminal_mode == 'auto':
-                if self._param_has_data(params):
-                    # 有参数：捕获输出并返回给 UI，不弹窗
-                    process = subprocess.Popen(
-                        cmd,
-                        env=env,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        creationflags=CREATE_NO_WINDOW
-                    )
-                    ScriptRunner.track_process(process, key)
-                    stdout_bytes, stderr_bytes = process.communicate()
-                    ScriptRunner.untrack_process(key)
-
-                    stdout = self._smart_decode(stdout_bytes)
-                    stderr = self._smart_decode(stderr_bytes)
-
-                    if process.returncode != 0:
-                        raise RuntimeError(f'执行失败: {stderr}')
-                    return True, stdout, stderr
-                else:
-                    # 无参数：直接弹窗让用户操作
-                    process = subprocess.Popen(
-                        cmd,
-                        env=env,
-                        creationflags=CREATE_NEW_CONSOLE
-                    )
-                    ScriptRunner.track_process(process, key)
-                    process.wait()
-                    ScriptRunner.untrack_process(key)
-                    return True, None, None
-
-            # 模式 D: 与 auto 相反 -- 有数据弹窗，空数据静默
-            elif terminal_mode == 'inverse':
-                if self._param_has_data(params):
-                    process = subprocess.Popen(
-                        cmd, env=env,
-                        creationflags=CREATE_NEW_CONSOLE
-                    )
-                    ScriptRunner.track_process(process, key)
-                    process.wait()
-                    ScriptRunner.untrack_process(key)
-                    return True, None, None
-                else:
-                    process = subprocess.Popen(
-                        cmd, env=env,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        stdin=subprocess.DEVNULL,
-                        creationflags=CREATE_NO_WINDOW,
-                    )
-                    ScriptRunner.track_process(process, key)
-                    process.wait()
-                    ScriptRunner.untrack_process(key)
-                    return True, None, None
-
-            else:
-                raise ValueError(f'无效的终端模式: {terminal_mode}')
-
+            process = subprocess.Popen(
+                cmd, env=env,
+                stdout=stdout, stderr=stderr, stdin=stdin,
+                creationflags=flags,
+            )
         except Exception as e:
             BM_LOG.error(f'子进程启动失败: {e}')
             raise RuntimeError(f'进程调度失败: {e}')
+
+        job = self._make_job(process)
+        ScriptRunner.track_process(process, key, job)
+        try:
+            if want_capture:
+                stdout_bytes, stderr_bytes = process.communicate()
+                out = self._smart_decode(stdout_bytes)
+                err = self._smart_decode(stderr_bytes)
+                if process.returncode != 0:
+                    raise RuntimeError(f'执行失败: {err}')
+                return True, out, err
+            process.wait()
+            return True, None, None
+        except RuntimeError:
+            raise
+        except Exception as e:
+            BM_LOG.error(f'子进程启动失败: {e}')
+            raise RuntimeError(f'进程调度失败: {e}')
+        finally:
+            ScriptRunner.untrack_process(key)
 
     def run_script_sync(self, script_id: str, param: str, timeout: float = None) -> dict:
         """
@@ -302,7 +296,7 @@ class ScriptRunner:
         config = self.configs[lang]
         cmd = config['cmd_gen'](str(script_path), version)
         if param.strip() and lang != 'html':
-            cmd.extend(shlex.split(param, posix=False))
+            cmd.append(param)
         try:
             env = self._prepare_env(lang, cmd[0])
             output_json = self._extract_output_json(param)
@@ -348,7 +342,8 @@ class ScriptRunner:
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW,
             )
-            ScriptRunner.track_process(process, key)
+            job = self._make_job(process)
+            ScriptRunner.track_process(process, key, job)
             try:
                 try:
                     out_b, err_b = process.communicate(timeout=timeout)
@@ -400,22 +395,29 @@ class ScriptRunner:
 
 
     # --- 具体的命令构造逻辑 ---
-    def _get_html_cmd(self, path:str, version: str) -> List[str]:
-        return ["webview-cli", path,'--width', str(self.HTML_WINDOW_WIDTH),'--height', str(self.HTML_WINDOW_HEIGHT)]
+    def _resolve_cli(self, name: str, version: str) -> str:
+        """解析运行时可执行文件路径，命中已存在的缓存直接复用（避免重复触发下载）"""
+        cache_key = (name, version)
+        cached = ScriptRunner._cli_cache.get(cache_key)
+        if cached and Path(cached).exists():
+            return cached
+        exe = str(PackagesManager().install_cli(name, version))
+        ScriptRunner._cli_cache[cache_key] = exe
+        return exe
+
+    def _get_html_cmd(self, path: str, version: str) -> List[str]:
+        return ["webview-cli", path, '--width', str(self.HTML_WINDOW_WIDTH), '--height', str(self.HTML_WINDOW_HEIGHT)]
 
     def _get_python_cmd(self, path: str, version: str) -> List[str]:
         venv_python = Path(path).parent / '.venv' / 'Scripts' / 'python.exe'
-        exe = venv_python if venv_python.exists() else PackagesManager().install_cli('python', version)
-        print(exe)
-        return [str(exe), path]
+        exe = str(venv_python) if venv_python.exists() else self._resolve_cli('python', version)
+        return [exe, path]
 
     def _get_node_cmd(self, path: str, version: str) -> List[str]:
-        exe = PackagesManager().install_cli('node', version)
-        return [str(exe), path]
+        return [self._resolve_cli('node', version), path]
 
     def _get_ahk_cmd(self, path: str, version: str) -> List[str]:
-        exe = PackagesManager().install_cli('autohotkey', version)
-        return [str(exe), path]
+        return [self._resolve_cli('autohotkey', version), path]
 
 
 

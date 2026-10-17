@@ -22,12 +22,13 @@ from app.utils.region import is_china
 class GitManager:
     """脚本仓库下载管理器 - GitHub 仓库走归档 zip（mudl 多线程下载 + 7zr 解压），其余回退 git 克隆"""
 
-    # 更新脚本时需保留的环境目录（在每一层递归中均跳过）
-    PRESERVE = {'.venv', 'node_modules', '.git'}
+    # 更新脚本时需保留的环境目录 / 记录文件（在同步时一律不删除）
+    PRESERVE = {'.venv', 'node_modules', '.git', '.bm-sync-manifest.json', '.bm-source.json'}
 
     def download_script_from_git(self, git_url: str, script_dir: str, branch: str = 'main') -> bool:
         dir_path = Path(script_dir).resolve()
 
+        # 失败时不再删除既有安装目录（更新场景下那是旧版本），交由上层回滚决定
         try:
             if 'github.com' in git_url:
                 try:
@@ -38,8 +39,6 @@ class GitManager:
             return self._clone_with_pygit2(git_url, dir_path, branch)
         except Exception as e:
             BM_LOG.error(f"下载脚本失败: {e}")
-            if dir_path.exists():
-                BmTools.remove_dir(dir_path)
             return False
 
     # --- GitHub 归档 zip 下载 ---
@@ -111,11 +110,13 @@ class GitManager:
         """
         递归合并 src 到 dest：
         - 新文件覆盖旧文件，新子目录递归合并；
-        - 旧目录中已不在新仓库里的内容（除 PRESERVE 环境目录外）全部清理，
-          保证脚本目录与仓库完全一致。
+        - 仅清理“上次同步记录中、本次已从仓库移除”的内容，保留 .venv/node_modules/.git
+          以及用户自建的数据文件（未被同步清单记录者不动）。
         """
-        src_items = {p.name for p in src.iterdir()}
+        src_names = {p.name for p in src.iterdir()}
         for item in src.iterdir():
+            if item.name == '.git':
+                continue
             target = dest / item.name
             if item.is_dir():
                 if target.exists():
@@ -126,22 +127,54 @@ class GitManager:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(item, target)
 
-        # 清理旧目录中已不存在的过期内容（保留环境目录）
-        for old in list(dest.iterdir()):
-            if old.name in cls.PRESERVE:
+        # 只删除“上次同步清单里有、本次仓库已没有”的条目（保留环境目录与用户文件）
+        old_names = cls._read_sync_manifest(dest)
+        for name in old_names:
+            if name in src_names or name in cls.PRESERVE:
                 continue
-            if old.name not in src_items:
-                if old.is_dir():
-                    BmTools.remove_dir(old)
-                else:
-                    old.unlink(missing_ok=True)
+            victim = dest / name
+            if victim.is_dir():
+                BmTools.remove_dir(victim)
+            else:
+                victim.unlink(missing_ok=True)
+
+        cls._write_sync_manifest(dest, src_names)
+
+    _SYNC_MANIFEST_NAME = '.bm-sync-manifest.json'
+
+    @classmethod
+    def _sync_manifest_path(cls, dest: Path) -> Path:
+        return dest / cls._SYNC_MANIFEST_NAME
+
+    @classmethod
+    def _read_sync_manifest(cls, dest: Path) -> set:
+        """读取该目录上次同步的子项名集合；无清单（旧安装）返回空集 → 不删除任何旧内容"""
+        try:
+            path = cls._sync_manifest_path(dest)
+            if path.exists():
+                data = json.loads(path.read_text(encoding='utf-8'))
+                if isinstance(data, list):
+                    return set(data)
+        except Exception as e:
+            BM_LOG.debug(f"读取同步清单失败 {dest}: {e}")
+        return set()
+
+    @classmethod
+    def _write_sync_manifest(cls, dest: Path, names: set):
+        try:
+            cls._sync_manifest_path(dest).write_text(
+                json.dumps(sorted(names), ensure_ascii=False), encoding='utf-8')
+        except Exception as e:
+            BM_LOG.debug(f"写入同步清单失败 {dest}: {e}")
 
     # --- git 克隆兜底 ---
 
     def _clone_with_pygit2(self, git_url: str, dir_path: Path, branch: str) -> bool:
         dir_path.parent.mkdir(parents=True, exist_ok=True)
-        if dir_path.exists():
-            BmTools.remove_dir(dir_path)
+
+        # 克隆到临时目录，成功后再合并进目标目录（保留 .venv/node_modules 与用户文件，
+        # 且失败时不破坏既有安装）
+        tmp_dir = dir_path.parent / f".{dir_path.name}.clone-{int(time.time() * 1000)}"
 
         is_github = 'github.com' in git_url
 
@@ -151,25 +184,38 @@ class GitManager:
         else:
             urls = [git_url]
 
-        for url in urls:
-            try:
-                pygit2.clone_repository(url, str(dir_path), depth=1, checkout_branch=branch)
-                BM_LOG.info(f"Git 克隆成功: {url[:60]}...")
-                return True
-            except Exception as e:
-                BM_LOG.debug(f"克隆失败 ({url[:60]}...): {e}")
-                continue
-
-        # 兜底：非中国区直连失败时再尝试加速代理
-        if is_github and not is_china():
-            for url in get_sorted_proxies(git_url):
+        def _try_clone(candidates) -> bool:
+            for url in candidates:
                 try:
-                    pygit2.clone_repository(url, str(dir_path), depth=1, checkout_branch=branch)
+                    pygit2.clone_repository(url, str(tmp_dir), depth=1, checkout_branch=branch)
                     BM_LOG.info(f"Git 克隆成功: {url[:60]}...")
                     return True
                 except Exception as e:
                     BM_LOG.debug(f"克隆失败 ({url[:60]}...): {e}")
+                    if tmp_dir.exists():
+                        BmTools.remove_dir(tmp_dir)
                     continue
+            return False
 
-        BM_LOG.error("所有代理尝试克隆都失败")
-        return False
+        try:
+            cloned = _try_clone(urls)
+            # 兜底：非中国区直连失败时再尝试加速代理
+            if not cloned and is_github and not is_china():
+                cloned = _try_clone(get_sorted_proxies(git_url))
+            if not cloned:
+                BM_LOG.error("所有代理尝试克隆都失败")
+                return False
+
+            dir_path.mkdir(parents=True, exist_ok=True)
+            self._sync_dir(tmp_dir, dir_path)
+            marker = {
+                'source': git_url,
+                'branch': branch,
+                'downloaded_at': time.strftime("%Y-%m-%dT%H:%M:%S"),
+            }
+            (dir_path / '.bm-source.json').write_text(
+                json.dumps(marker, ensure_ascii=False), encoding='utf-8')
+            return True
+        finally:
+            if tmp_dir.exists():
+                BmTools.remove_dir(tmp_dir)

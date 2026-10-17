@@ -11,9 +11,8 @@ from PySide2.QtWidgets import QWidget, QVBoxLayout, QApplication, QListWidgetIte
 
 from xsideui import XListWidget, XDialog, tr
 
-from app.data import ProjectGlobal, ScriptDatabase
-from app.utils import BmNotify, BmTools, ParameterManager
-from app.utils.parameter_generate import build_launch_env
+from app.data import ProjectGlobal
+from app.utils import BmNotify, BmTools
 from app.works import ExecuteScriptWork
 from .fast_text_signal import MouseSignals
 
@@ -52,7 +51,7 @@ class FastTextMenu(XDialog):
     def setup_list_items(self):
         # 清空列表
         self.scripts_list.clear()
-        for value in (ProjectGlobal.SCRIPTS or []):
+        for value in (ProjectGlobal.safe_get('SCRIPTS') or []):
             if not value.quick_copy_active:
                 continue
             icon = value.icon
@@ -63,60 +62,38 @@ class FastTextMenu(XDialog):
             self.scripts_list.addItem(item)
 
     def on_script_selected(self, item):
+        from app.servers.scripts import (
+            ScriptLaunchService, ScriptBusyError, ScriptNotFoundError)
         script_id = item.data(Qt.UserRole)
 
         if not self._clipboard_text:
             BmNotify().show_error_notify(content=tr('Clipboard content is empty'))
             return
 
-        # 从数据库获取脚本的输入定义（脚本可能已被卸载）
-        script_data = ScriptDatabase().get_script_by_id(script_id)
-        if not script_data:
+        # 先原子占用 + 构造参数（含可选参数表单），失败/取消一律已自动清理
+        try:
+            ctx = ScriptLaunchService.prepare(
+                script_id, data=[self._clipboard_text],
+                invoke_mode='manual', allow_params_form=True,
+                reserve_first=True, parent=self, source='quick_copy')
+        except ScriptBusyError:
+            BmNotify().show_warning_notify(tr('脚本正在运行中，请等待完成'))
+            return
+        except ScriptNotFoundError:
             BmNotify().show_error_notify(content=tr('脚本不存在或已被卸载'))
             self.hide_window()
             return
-        inputs = script_data.inputs_schema
-        input_data = inputs[0] if inputs else {}
-        params_defs = script_data.params_schema or []
 
-        data_list = [self._clipboard_text]
-        params_overrides = {}
-        if getattr(script_data, 'params_form_enabled', False):
-            from app.view.script_ui.params_prompt import show_params_prompt
-            res = show_params_prompt(script_data, data_list, parent=self)
-            if res is None:  # 用户取消
-                self.hide_window()
-                return
-            data_list, params_overrides = res
-
-        # 用标准 JSON 参数文件传递（注入 params 默认值）
-        json_path = ParameterManager().construct_parameters(
-            script_input_data=input_data,
-            data=data_list,
-            params_defs=params_defs,
-            params_overrides=params_overrides,
-            env_extra=build_launch_env(script_id),
-        )
-        if not json_path:
-            BmNotify().show_error_notify(content=tr('参数构造失败'))
+        if ctx is None:  # 参数表单取消
+            self.hide_window()
             return
 
-        # 同一把锁内「检查 + 占位」，消除 GUI 线程与 worker 之间的启动竞态
-        from app.data import ProjectGlobal
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            if script_id in ProjectGlobal.RUNNING_SCRIPTS:
-                name = script_data.name if script_data else script_id
-                BmNotify().show_warning_notify(f"脚本「{name}」正在运行中，请等待完成")
-                return
-            ProjectGlobal.RUNNING_SCRIPTS.add(script_id)
-
         try:
-            self.run = ExecuteScriptWork(script_id=script_id, script_args=str(json_path))
+            self.run = ExecuteScriptWork(ctx)
             self.run.execute_signal.connect(self._execute_notify)
             self.run.start()
         except Exception:
-            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-                ProjectGlobal.RUNNING_SCRIPTS.discard(script_id)
+            ScriptLaunchService.cleanup(ctx)
             raise
         self.hide_window()
 

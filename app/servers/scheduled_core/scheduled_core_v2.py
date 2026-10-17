@@ -27,9 +27,8 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.events import EVENT_JOB_MISSED
 
-from app.data.database import TaskDatabase, ScriptDatabase
-from app.utils import BM_LOG, ParameterManager
-from app.servers.scripts import ScriptRunner
+from app.data.database import TaskDatabase
+from app.utils import BM_LOG
 from app.utils.parameter_generate import build_launch_env
 
 
@@ -118,32 +117,29 @@ class DatabaseTaskScheduler:
     def execute_script(self, script_id, parameters: list, params_overrides: dict = None, task_id: int = None):
         """执行外部脚本；注入 output_json 供脚本回传结果，跑完记录执行历史。
         返回 {ok, status, code, msg, duration_ms}（未记录历史时 status/duration 可能为默认）。"""
-        from app.data import ProjectGlobal
+        from app.servers.scripts import ScriptLaunchService
         result = {'ok': False, 'status': 'failed', 'code': None, 'msg': None, 'duration_ms': None}
-        with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-            ProjectGlobal.RUNNING_SCRIPTS.add(script_id)
+        # 原子占用：与手动触发/其它任务共用单例约束
+        if not ScriptLaunchService.reserve(script_id):
+            result['status'] = 'skipped'
+            result['msg'] = '脚本正在运行中，跳过本次定时执行'
+            return result
         output_json = None
         status = 'failed'
         start = time.perf_counter()
+        ctx = None
         try:
             if not isinstance(parameters, list):
                 parameters = [parameters] if parameters else []
-            script_data = ScriptDatabase().get_script_by_id(script_id)
-            inputs_schema = script_data.inputs_schema if script_data else []
-            input_data = inputs_schema[0] if inputs_schema else {}
-            params_defs = script_data.params_schema if script_data else []
             output_json = str(Path(tempfile.gettempdir()) / f"bms_{uuid.uuid4().hex}.out.json")
             env_extra = build_launch_env(script_id, invoke_mode="scheduled")
 
-            json_path = ParameterManager().construct_parameters(
-                input_data, parameters,
-                output_json=output_json,
-                params_defs=params_defs,
-                params_overrides=params_overrides,
-                env_extra=env_extra,
+            ctx = ScriptLaunchService.prepare(
+                script_id, data=parameters, params_overrides=params_overrides,
+                invoke_mode='scheduled', allow_params_form=False, reserve_first=False,
+                output_json=output_json, env_extra=env_extra,
             )
-            param_str = str(json_path)
-            ScriptRunner().run_script(script_id=script_id, param=param_str)
+            ScriptLaunchService.run(ctx)
             status = 'success'
             result['ok'] = True
 
@@ -153,8 +149,10 @@ class DatabaseTaskScheduler:
             result['msg'] = str(e)
             return result
         finally:
-            with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
-                ProjectGlobal.RUNNING_SCRIPTS.discard(script_id)
+            if ctx is not None:
+                ScriptLaunchService.cleanup(ctx)
+            else:
+                ScriptLaunchService.release(script_id)
             if task_id is not None:
                 outcome = self._record_task_run(task_id, script_id, output_json, status, result.get('code'), result.get('msg'), start)
                 result.update(outcome)
@@ -191,6 +189,14 @@ class DatabaseTaskScheduler:
         reschedule=True 表示该 job 用一次性 DateTrigger 排程，跑完需重排下一轮
         （固定间隔带扰动、每月；jitter=0 的固定间隔与 daily/weekly 由重复 trigger 续，为 False）。"""
         result = self.execute_script(script_id, parameters, params_overrides, task_id)
+
+        # 脚本正被其它入口占用而跳过：记一条 skipped，不计入执行次数、不重排
+        if result.get('status') == 'skipped':
+            try:
+                TaskDatabase.record_task_run(task_id, script_id, 'skipped')
+            except Exception as e:
+                BM_LOG.error(f"[定时任务] 记录跳过失败 task={task_id}: {e}")
+            return
 
         try:
             TaskDatabase.increment_executed_count(task_id)

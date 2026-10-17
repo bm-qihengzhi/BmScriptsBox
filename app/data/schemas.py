@@ -26,7 +26,7 @@ class ScriptEntity(BaseModel):
     language_version:str
     entry: str
     terminal: str = "never"
-    binaries: List[Dict[str, str]] = Field(default_factory=list)
+    binaries: List[Dict[str, Any]] = Field(default_factory=list)
     dependencies: List[str] = Field(default_factory=list)
 
     # --- 3. IO 契约 ---

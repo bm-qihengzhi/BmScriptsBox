@@ -17,20 +17,69 @@ from app.utils.tools import BmTools
 DEFAULT_API_BASE = "http://127.0.0.1:9527"
 
 
+def _collect_script_binaries(script_id: str) -> dict:
+    """
+    解析脚本声明的外部二进制，返回 {声明名: {命令名: 绝对路径}}，供注入 environment.binaries。
+    - 官方清单模式与直连模式统一：都按安装清单解析出可执行文件的绝对路径。
+    - 任何异常都返回 {}（不影响脚本启动）。
+    """
+    if not script_id:
+        return {}
+    try:
+        from pathlib import Path as _Path
+        from app.data import ScriptDatabase
+        from app.servers.packages import PackagesManager
+
+        script = ScriptDatabase.get_script_by_id(script_id)
+        decls = getattr(script, 'binaries', None) if script else None
+        if not decls:
+            return {}
+        pm = PackagesManager()
+        result = {}
+        for b in decls:
+            if not isinstance(b, dict):
+                continue
+            name = (b.get('name') or '').strip()
+            if not name:
+                continue
+            paths = pm.installed_paths(name, (b.get('version') or '').strip())
+            if not paths:
+                BM_LOG.debug(
+                    f"[二进制注入] 未找到已安装路径，跳过注入: {name} "
+                    f"(version='{(b.get('version') or '').strip()}')")
+                continue
+            group = {}
+            for p in paths:
+                stem = _Path(p).stem
+                if stem:
+                    group[stem] = p
+            if group:
+                result[name] = group
+        return result
+    except Exception as e:
+        BM_LOG.warning(f"注入外部二进制路径失败: {e}")
+        return {}
+
+
 def build_launch_env(script_id: str, api_base: str = DEFAULT_API_BASE,
                      script_dir: str = None, invoke_mode: str = "manual") -> dict:
     """
     构造注入脚本 environment 段的盒子上下文（脚本只读，供其作为联动发起方连回盒子）。
     invoke_mode：'manual'（手动触发，默认）/ 'node'（以节点形式被调用，须自动运行并写回信封）。
     不含身份 token，链接门禁收敛在 /api/link 的 is_node 校验。
+    另注入 binaries：脚本声明过的外部二进制可执行文件绝对路径（{声明名: {命令名: 路径}}）。
     """
-    return {
+    env = {
         "api_base": api_base,
         "task_id": uuid.uuid4().hex,
         "script_id": script_id,
         "script_dir": script_dir or str(BmTools.get_script_dir_path(script_id)),
         "invoke_mode": invoke_mode,
     }
+    bins = _collect_script_binaries(script_id)
+    if bins:
+        env["binaries"] = bins
+    return env
 
 
 class ParameterManager:

@@ -7,10 +7,52 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import os
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, model_validator, ValidationInfo, field_validator
 from typing import List, Dict, Any, Optional
 from uuid import UUID
+
+
+# --- 二进制来源白名单：直连模式仅允许 GitHub ---
+GITHUB_ALLOWED_HOSTS = {
+    "github.com", "api.github.com", "codeload.github.com",
+    "raw.githubusercontent.com", "objects.githubusercontent.com",
+}
+GITHUB_ALLOWED_HOST_SUFFIX = ".githubusercontent.com"
+
+# 保留命令名：直连模式禁止以这些名字注册 shim，避免劫持盒子/系统核心工具
+RESERVED_COMMAND_NAMES = {
+    "python", "pythonw", "python3", "pip", "pip3",
+    "node", "nodejs", "npm", "npx", "pnpm", "yarn",
+    "uv", "uvx", "pwsh", "powershell",
+    "cmd", "command", "bash", "sh", "git",
+    "msiexec", "reg", "regedit", "rundll32", "cscript", "wscript",
+    "explorer", "taskkill", "tasklist", "where", "whoami", "net", "sc",
+    "conhost", "schtasks", "wmic", "certutil", "bitsadmin",
+}
+
+
+def _is_allowed_binary_url(url: str) -> bool:
+    """直连下载地址校验：必须为 https 且属地 GitHub 白名单域名"""
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+    if p.scheme != "https":
+        return False
+    host = (p.netloc or "").split("@")[-1].split(":")[0].lower()
+    if not host:
+        return False
+    return host in GITHUB_ALLOWED_HOSTS or host.endswith(GITHUB_ALLOWED_HOST_SUFFIX)
+
+
+def _reserve_name_of(name: str) -> str:
+    """取命令名的基名（去掉 .exe 后缀、小写），用于保留名比对"""
+    base = (name or "").strip().lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return base
 
 
 
@@ -63,13 +105,75 @@ class ScriptModel(BaseModel):
         return v.lower()
 
 
+# --- 2.5 外部二进制声明 ([[bmscriptsbox.runtime.binaries]]) ---
+class ScriptBinary(BaseModel):
+    """
+    外部二进制声明，支持两种模式：
+    - 官方清单模式：只写 name（+可选 version），从盒子官方二进制仓库解析下载；
+    - 作者直连模式：写 url（GitHub 直链），盒子下载 → 校验 → 解压/安装 → 注册 shim。
+    兼容旧形态：{name="x", version=">=1"} 直接解析为官方清单模式。
+    """
+    name: str = Field(min_length=1)                 # 命令名 / shim 名
+    version: str = ""                               # 官方模式：版本约束
+    url: Optional[str] = None                       # 直连模式：GitHub 直链（可为 /releases/latest/download/...）
+    sha256: Optional[str] = None                    # 直连模式：可选，固定版本建议填写；latest 走 TOFU
+    bin: List[str] = Field(default_factory=list)    # 解压后需暴露的可执行文件名（单文件可留空）
+    extract: bool = True                            # True=按归档解压；False=单文件/exe/msi
+    install: Optional[Dict[str, Any]] = None        # exe/msi 静默安装参数（需用户二次确认）
+    env_set: Optional[bool] = None                  # 是否生成命令并加入 PATH；None=用默认（官方取清单值、直连取 false）
+
+    @field_validator('url')
+    @classmethod
+    def check_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not str(v).strip():
+            return None
+        v = str(v).strip()
+        if not _is_allowed_binary_url(v):
+            raise ValueError(
+                "binaries.url 仅允许 GitHub 直链（https://github.com/... 或 *.githubusercontent.com）")
+        return v
+
+    @field_validator('sha256')
+    @classmethod
+    def check_sha256(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not str(v).strip():
+            return None
+        v = str(v).strip().lower()
+        if not re.fullmatch(r'[0-9a-f]{64}', v):
+            raise ValueError("binaries.sha256 必须是 64 位十六进制字符串")
+        return v
+
+    @model_validator(mode='after')
+    def check_direct_mode(self):
+        # 直连模式（写了 url）：禁止使用保留命令名，防止劫持核心工具
+        if self.url:
+            if _reserve_name_of(self.name) in RESERVED_COMMAND_NAMES:
+                raise ValueError(
+                    f"直连模式下 binaries.name '{self.name}' 为保留命令名，禁止使用")
+        return self
+
+
 # --- 3. 运行时子模型 ---
 class ScriptRuntime(BaseModel):
     language: str = Field(min_length=1)
     language_version: str
     entry: str = Field(min_length=1)
     terminal: str = "always"
-    binaries: List[Dict[str, str]] = Field(default_factory=list)
+    binaries: List[ScriptBinary] = Field(default_factory=list)
+
+    @field_validator('binaries', mode='before')
+    @classmethod
+    def filter_empty_binaries(cls, v):
+        """兼容旧配置中的空占位条目：name/url 均为空则丢弃"""
+        if not v:
+            return v
+        out = []
+        for item in v:
+            if isinstance(item, dict):
+                if not (str(item.get('name') or '').strip() or str(item.get('url') or '').strip()):
+                    continue
+            out.append(item)
+        return out
 
     @field_validator('entry')
     @classmethod
@@ -123,6 +227,7 @@ class ShortcutConfig(BaseModel):
     enabled: bool = False
     input_type: str = ''
     filters: List[str] = Field(default_factory=list)
+    hotkey: Optional[str] = None   # 全局快捷键组合（如 "ctrl+alt+k"），供数据库热键唯一性校验使用
 
 
 class QuickCopyConfig(BaseModel):

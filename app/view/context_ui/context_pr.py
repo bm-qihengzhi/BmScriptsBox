@@ -42,33 +42,41 @@ class MenuPresenter(QObject):
     def on_status_changed(self, script_id: str, status: bool):
         """状态改变"""
         try:
-            self.model.modify_menu_status(script_id, status)
+            self.model.modify_menu_status(script_id, status, self._current_target)
         except Exception as e:
             self.notification.emit(f"修改状态失败: {str(e)}", "error")
 
-    def on_move_up(self, row: int):
+    def on_move_up(self, script_id: str):
         """上移菜单项"""
-        success = self.model.move_menu_item(row, 'up', self._current_target)
-        if success:
-            self.notification.emit("菜单上移成功", "success")
-            self.refresh_data()
-            self.action_completed.emit("move", True, "up")
-        else:
-            self.notification.emit("第一行无法上移", "warning")
+        self._do_move(script_id, 'up')
 
-    def on_move_down(self, row: int):
+    def on_move_down(self, script_id: str):
         """下移菜单项"""
-        success = self.model.move_menu_item(row, 'down', self._current_target)
-        if success:
-            self.notification.emit("菜单下移成功", "success")
-            self.refresh_data()
-            self.action_completed.emit("move", True, "down")
-        else:
-            self.notification.emit("最后一行无法下移", "warning")
+        self._do_move(script_id, 'down')
 
-    def on_change_level(self, row: int, new_level: int):
+    def _do_move(self, script_id: str, direction: str):
+        result = self.model.move_menu_item(script_id, direction, self._current_target)
+        if result == 'ok':
+            self.notification.emit(
+                "菜单上移成功" if direction == 'up' else "菜单下移成功", "success")
+            self.refresh_data()
+            self.action_completed.emit("move", True, direction)
+        elif result == 'first':
+            self.notification.emit("第一行无法上移", "warning")
+        elif result == 'last':
+            self.notification.emit("最后一行无法下移", "warning")
+        elif result == 'boundary':
+            self.notification.emit("无法跨越一/二级分组移动", "warning")
+        else:
+            self.notification.emit("未找到菜单项", "error")
+
+    def on_change_level(self, script_id: str, new_level: int):
         """改变菜单级别"""
-        success = self.model.change_menu_level(row, new_level, self._current_target)
+        try:
+            success = self.model.change_menu_level(script_id, new_level, self._current_target)
+        except Exception as e:
+            self.notification.emit(f"菜单级别变更失败: {str(e)}", "error")
+            return
         if success:
             level_text = "一级" if new_level == 1 else "二级"
             self.notification.emit(f"已{'升' if new_level == 1 else '降'}为{level_text}菜单", "success")
