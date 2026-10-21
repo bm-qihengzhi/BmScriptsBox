@@ -23,8 +23,8 @@
 
 
 
-## 🎯关于
----
+## 关于
+
 
 
 BmScriptsBox（不忙脚本盒子）是一款面向 Windows 的跨语言脚本管理器：让普通用户无需接触命令行，也能像使用手机 App 一样查找、安装并一键运行自动化脚本。
@@ -37,7 +37,6 @@ BmScriptsBox（不忙脚本盒子）是一款面向 Windows 的跨语言脚本�
 
 ## 📸 预览
 
----
 
 
 <p align="center">
@@ -47,7 +46,7 @@ BmScriptsBox（不忙脚本盒子）是一款面向 Windows 的跨语言脚本�
 
 
 ## ✨ 核心功能
----
+
 
 ### 给普通用户：像管理手机 App 一样使用脚本
 
@@ -74,7 +73,7 @@ BmScriptsBox（不忙脚本盒子）是一款面向 Windows 的跨语言脚本�
 
 
 ## 快速入门
----
+
 
 ### 安装软件
 - **普通用户（推荐）**：从 [Releases](https://github.com/bm-qihengzhi/BmScriptsBox/releases/latest) 下载安装包，支持 Windows 10 / 11。安装包已内置运行时与依赖，开箱即用。
@@ -87,7 +86,7 @@ BmScriptsBox（不忙脚本盒子）是一款面向 Windows 的跨语言脚本�
 
 
 ## 脚本开发
----
+
 
 BmScriptsBox 是一个高自由度、低侵入的脚本运行底座：不绑定特定语言，没有 SDK，也无需 `import` 盒子的任何库。使用 Python、JavaScript、PowerShell、AutoHotkey、Batch 等语言编写的脚本，只需一份 `TOML` 声明即可接入，自动获得图形界面、参数注入、定时调度与分发能力，无需编写 GUI 或打包成 exe。
 
@@ -99,7 +98,7 @@ BmScriptsBox 是一个高自由度、低侵入的脚本运行底座：不绑定�
 
 
 ## 贡献
----
+
 
 - **脚本**：写好脚本和声明文件，提交 GitHub 仓库地址即可发布到社区；
 - **代码**：建议先开 Issue 说明场景，再提 PR，分支命名 `feat/xxx`、`fix/xxx`、`docs/xxx`；
@@ -109,7 +108,7 @@ BmScriptsBox 是一个高自由度、低侵入的脚本运行底座：不绑定�
 
 
 ## 许可证
----
+
 
 **MIT License + Commons Clause**，属于 source-available，不属于 OSI 定义的开源许可。
 
