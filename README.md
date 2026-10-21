@@ -17,8 +17,7 @@
 <p align="center">
   <a href="https://www.bm-box.cn">官方网站</a> ·
   <a href="https://www.bm-box.cn/scripts">脚本社区</a> ·
-  <a href="https://www.bm-box.cn/help/api">开发者文档</a> ·
-  <a href="https://github.com/bm-qihengzhi/BmScriptsBox/releases/latest">国内下载</a>
+  <a href="https://www.bm-box.cn/help/api">开发者文档</a> 
 </p>
 
 
