@@ -117,13 +117,8 @@ class DatabaseTaskScheduler:
     def execute_script(self, script_id, parameters: list, params_overrides: dict = None, task_id: int = None):
         """执行外部脚本；注入 output_json 供脚本回传结果，跑完记录执行历史。
         返回 {ok, status, code, msg, duration_ms}（未记录历史时 status/duration 可能为默认）。"""
-        from app.servers.scripts import ScriptLaunchService
+        from app.servers.scripts import ScriptLaunchService, ScriptBusyError
         result = {'ok': False, 'status': 'failed', 'code': None, 'msg': None, 'duration_ms': None}
-        # 原子占用：与手动触发/其它任务共用单例约束
-        if not ScriptLaunchService.reserve(script_id):
-            result['status'] = 'skipped'
-            result['msg'] = '脚本正在运行中，跳过本次定时执行'
-            return result
         output_json = None
         status = 'failed'
         start = time.perf_counter()
@@ -134,26 +129,28 @@ class DatabaseTaskScheduler:
             output_json = str(Path(tempfile.gettempdir()) / f"bms_{uuid.uuid4().hex}.out.json")
             env_extra = build_launch_env(script_id, invoke_mode="scheduled")
 
+            # 原子占用：与手动触发/其它任务共用单例约束；所有权随 ctx 转移，由 cleanup 释放
             ctx = ScriptLaunchService.prepare(
                 script_id, data=parameters, params_overrides=params_overrides,
-                invoke_mode='scheduled', allow_params_form=False, reserve_first=False,
+                invoke_mode='scheduled', allow_params_form=False, reserve_first=True,
                 output_json=output_json, env_extra=env_extra,
             )
             ScriptLaunchService.run(ctx)
             status = 'success'
             result['ok'] = True
 
+        except ScriptBusyError:
+            # 跳过记录由 _run_and_manage 负责，这里不写执行历史
+            result['status'] = 'skipped'
+            result['msg'] = '脚本正在运行中，跳过本次定时执行'
         except Exception as e:
             BM_LOG.error(f"执行脚本异常 {script_id}: {e}")
-            status, code, msg = 'failed', None, str(e)
+            status = 'failed'
             result['msg'] = str(e)
-            return result
         finally:
             if ctx is not None:
                 ScriptLaunchService.cleanup(ctx)
-            else:
-                ScriptLaunchService.release(script_id)
-            if task_id is not None:
+            if task_id is not None and result.get('status') != 'skipped':
                 outcome = self._record_task_run(task_id, script_id, output_json, status, result.get('code'), result.get('msg'), start)
                 result.update(outcome)
         return result

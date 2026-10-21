@@ -221,23 +221,19 @@ class ExecuteScriptFromHotkeyWork(QThread):
         self.script_id = script_id
 
     def run(self):
-        from app.servers.scripts import ScriptLaunchService
+        from app.servers.scripts import ScriptLaunchService, ScriptBusyError
         pythoncom.CoInitialize()
         ctx = None
         try:
             self.execute_script_signal.emit({'status': True, 'message': '正在准备参数...'})
-            # 原子占用：消除"检查-注册"竞态，快速连按不再双跑
-            if not ScriptLaunchService.reserve(self.script_id):
+            # 原子占用由 prepare 内部完成：占用所有权随 ctx 转移，cleanup 统一释放
+            try:
+                ctx = self._prepare_context()
+            except ScriptBusyError:
                 self.execute_script_signal.emit(
                     {'status': False, 'message': '脚本正在运行中，请等待完成'})
                 return
-            try:
-                ctx = self._prepare_context()
-            except Exception:
-                ScriptLaunchService.release(self.script_id)
-                raise
-            if ctx is None:  # 参数表单被取消
-                ScriptLaunchService.release(self.script_id)
+            if ctx is None:  # 参数表单被取消（prepare 已释放占用）
                 return
             ScriptLaunchService.run(ctx)
         except Exception as e:
@@ -267,7 +263,7 @@ class ExecuteScriptFromHotkeyWork(QThread):
         return ScriptLaunchService.prepare(
             self.script_id, data=paths,
             invoke_mode='manual', allow_params_form=True,
-            reserve_first=False,
+            reserve_first=True,
             env_extra=build_launch_env(self.script_id),
         )
 

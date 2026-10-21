@@ -126,7 +126,14 @@ class ScriptPresenter(QObject):
         worker.execute_signal.connect(self._on_executed)
         worker.finished.connect(lambda sid=script_id: self._execute_workers.pop(sid, None))
         self._execute_workers[script_id] = worker
-        worker.start()
+        try:
+            worker.start()
+        except Exception as e:
+            # 兜底：线程未能启动时释放占用并清理参数文件，避免脚本永久"运行中"
+            self._execute_workers.pop(script_id, None)
+            ScriptLaunchService.cleanup(ctx)
+            BM_LOG.error(f"启动执行线程失败 {script_id}: {e}")
+            BmNotify().show_error_notify(content=tr('Executing Failed'))
 
     def uninstall_script(self, script_id):
         from app.works.script_work import UninstallScriptWork

@@ -177,7 +177,12 @@ class FlaskServer:
                 except ScriptNotFoundError as e:
                     return flask.jsonify({"status": "error", "message": str(e)}), 404
 
-                self.signals.execute_script_request.emit(ctx)
+                try:
+                    self.signals.execute_script_request.emit(ctx)
+                except Exception:
+                    # 兜底：请求未能交给执行线程时释放占用，避免脚本永久"运行中"
+                    ScriptLaunchService.cleanup(ctx)
+                    raise
                 return flask.jsonify({"status": "success", "message": "脚本执行请求已接收"}), 200
 
             except Exception as e:
@@ -402,18 +407,15 @@ class FlaskServer:
                     api_base=f"http://{self.host}:{self.port}",
                     invoke_mode="manual",
                 )
-                try:
-                    ctx = ScriptLaunchService.prepare(
-                        script_id, data=data_list, params_overrides=user_params,
-                        params_defs=params_defs, invoke_mode="manual",
-                        allow_params_form=False, reserve_first=False,
-                        env_extra=env_extra,
-                    )
-                except Exception:
-                    ScriptLaunchService.release(script_id)
-                    raise
-                if ctx is None:
-                    ScriptLaunchService.release(script_id)
+                # 占用已由上方 reserve() 完成；所有权随 ctx 转移，执行线程 cleanup 时统一释放
+                ctx = ScriptLaunchService.prepare(
+                    script_id, data=data_list, params_overrides=user_params,
+                    params_defs=params_defs, invoke_mode="manual",
+                    allow_params_form=False, reserve_first=False,
+                    holds_reservation=True,
+                    env_extra=env_extra,
+                )
+                if ctx is None:  # 用户取消/构造失败，prepare 已释放占用
                     return
                 self.signals.execute_script_request.emit(ctx)
             except Exception:

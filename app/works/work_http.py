@@ -62,6 +62,9 @@ class FlaskWork(QThread):
 
         except Exception as e:
             BM_LOG.error(f"{e}")
+            # 兜底：执行线程没起来时释放占用，避免脚本永久"运行中"
+            from app.servers.scripts import ScriptLaunchService
+            ScriptLaunchService.cleanup(ctx)
 
     def _execute_script_in_thread(self, ctx):
         """在单独的线程中执行脚本，结束时释放占用并清理参数文件"""

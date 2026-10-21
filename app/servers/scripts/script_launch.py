@@ -51,6 +51,7 @@ class ScriptLaunchService:
         """同锁"检查+占位"，成功返回 True（消除检查-注册竞态）"""
         with ProjectGlobal.RUNNING_SCRIPTS_LOCK:
             if script_id in ProjectGlobal.RUNNING_SCRIPTS:
+                BM_LOG.warning(f"脚本已在运行中，拒绝重复启动: {script_id}")
                 return False
             ProjectGlobal.RUNNING_SCRIPTS.add(script_id)
             return True
@@ -72,17 +73,23 @@ class ScriptLaunchService:
     def prepare(cls, script_id: str, *, data=None, params_overrides=None,
                 params_defs=None, invoke_mode: str = 'manual',
                 allow_params_form: bool = True, reserve_first: bool = True,
+                holds_reservation: bool = False,
                 parent=None, output_json: str = None, env_extra: dict = None,
                 source: str = 'manual') -> Optional[LaunchContext]:
         """
         构造一次可运行的 LaunchContext。
         reserve_first=True 时先原子占用；用户取消 / 异常 → 自动释放占用并删除 JSON，
         返回 None 表示用户取消。
+
+        holds_reservation: reserve_first=False 且调用方已自行 reserve() 时置 True，
+        把占用所有权转交给本 ctx，由 cleanup() 统一释放（避免各入口重复实现释放逻辑）。
         """
         owned = False
         if reserve_first:
             if not cls.reserve(script_id):
                 raise ScriptBusyError(script_id)
+            owned = True
+        elif holds_reservation:
             owned = True
 
         json_path = None
