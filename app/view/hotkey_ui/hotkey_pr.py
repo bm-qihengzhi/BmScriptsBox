@@ -23,32 +23,33 @@ class HotkeyPresenter(QObject):
         super().__init__()
         self.model = HotkeyModel()
         self._all_scripts: List[ScriptEntity] = []
+        self._visible_scripts: List[ScriptEntity] = []
+        self._last_keyword = ""
 
     def load_scripts(self):
-        """加载脚本数据"""
-        # try:
+        """加载脚本数据，并重新套用当前搜索词"""
         scripts = self.model.load_scripts()
         self._all_scripts = scripts
-        self.scripts_loaded.emit(scripts)
-        # except Exception as e:
-        #     print(e)
-        #     self.notification.emit(f"加载数据失败: {str(e)}", False)
+        self._apply_filter(self._last_keyword, notify=False)
 
     def search_scripts(self, keyword: str):
-        """搜索脚本"""
+        """搜索脚本（名称支持拼音，快捷键字段保持原匹配）"""
         try:
-            if not keyword:
-                self.scripts_loaded.emit(self._all_scripts)
-                return
-
-            filtered = self.model.search_scripts(keyword)
-            if not filtered:
-                self.notification.emit("未搜索到任何脚本", False)
-                return
-
-            self.scripts_loaded.emit(filtered)
+            self._last_keyword = (keyword or "").strip()
+            self._apply_filter(self._last_keyword, notify=True)
         except Exception as e:
             self.notification.emit(f"搜索失败: {str(e)}", False)
+
+    def _apply_filter(self, keyword: str, notify: bool = True):
+        """过滤后保存当前可见列表，供右键菜单按行取脚本"""
+        filtered = self.model.search_scripts(keyword, self._all_scripts)
+        self._visible_scripts = filtered
+        if not filtered and keyword:
+            if notify:
+                self.notification.emit("未搜索到任何脚本", False)
+            self.scripts_loaded.emit([])
+            return
+        self.scripts_loaded.emit(filtered)
 
     def edit_hotkey(self, script_id: str):
         """请求编辑快捷键"""
@@ -87,7 +88,7 @@ class HotkeyPresenter(QObject):
         return conflict.name if conflict else None
 
     def get_script_by_row(self, row: int) -> ScriptEntity:
-        """根据行号获取脚本"""
-        if 0 <= row < len(self._all_scripts):
-            return self._all_scripts[row]
+        """根据当前可见行号获取脚本（必须用过滤后的列表，不能用全量列表）"""
+        if 0 <= row < len(self._visible_scripts):
+            return self._visible_scripts[row]
         return None

@@ -324,8 +324,9 @@ class ContextManager:
     def move_menu_item(self, script_id: str, direction: str, target: str) -> str:
         """移动菜单项。
 
+        direction：up | down | top | bottom
         返回：ok | first | last | boundary | not_found
-        boundary 表示相邻项属于不同分组（一级提升项 vs 二级子项），拒绝移动。
+        first / last 表示已在同层级分组的第一 / 最后一项；boundary 仅用于 up / down 跨组。
         """
         script_id = str(script_id)
         with _CONFIG_LOCK:
@@ -337,26 +338,57 @@ class ContextManager:
             if index is None:
                 return "not_found"
 
-            if direction == "up":
-                if index == 0:
-                    return "first"
-                cur, neighbor = refs[index], refs[index - 1]
-            elif direction == "down":
-                if index == len(refs) - 1:
-                    return "last"
-                cur, neighbor = refs[index], refs[index + 1]
-            else:
+            cur = refs[index]
+
+            if direction in ("up", "down"):
+                if direction == "up":
+                    if index == 0:
+                        return "first"
+                    neighbor = refs[index - 1]
+                else:
+                    if index == len(refs) - 1:
+                        return "last"
+                    neighbor = refs[index + 1]
+
+                if cur["group"] != neighbor["group"]:
+                    return "boundary"
+
+                if cur["group"] == "sub":
+                    sub = cur["submenu"]
+                    i, j = cur["sub_index"], neighbor["sub_index"]
+                    sub[i], sub[j] = sub[j], sub[i]
+                else:
+                    self._swap_top_slots(config, target, cur["item"], neighbor["item"])
+
+                self.save_config(config)
+                return "ok"
+
+            if direction not in ("top", "bottom"):
                 return "not_found"
 
-            if cur["group"] != neighbor["group"]:
-                return "boundary"
+            # 置顶 / 置底只在本层级分组内移动，不改变菜单级别
+            group_refs = [r for r in refs if r["group"] == cur["group"]]
+            if group_refs and group_refs[0]["item"] is cur["item"]:
+                if direction == "top":
+                    return "first"
+            if group_refs and group_refs[-1]["item"] is cur["item"]:
+                if direction == "bottom":
+                    return "last"
 
             if cur["group"] == "sub":
                 sub = cur["submenu"]
-                i, j = cur["sub_index"], neighbor["sub_index"]
-                sub[i], sub[j] = sub[j], sub[i]
+                sub.pop(cur["sub_index"])
+                target_indices = [
+                    i for i, item in enumerate(sub)
+                    if target in (item.get("target", []) or [])
+                ]
+                if direction == "top":
+                    insert_at = target_indices[0] if target_indices else 0
+                else:
+                    insert_at = (target_indices[-1] + 1) if target_indices else 0
+                sub.insert(insert_at, cur["item"])
             else:
-                self._swap_top_slots(config, target, cur["item"], neighbor["item"])
+                self._move_top_to_edge(config, target, cur["item"], direction == "top")
 
             self.save_config(config)
             return "ok"
@@ -373,6 +405,23 @@ class ContextManager:
         except ValueError:
             return
         items[ia], items[ib] = items[ib], items[ia]
+        for slot, menu in zip(slots, items):
+            config["menuItems"][slot] = menu
+
+    @staticmethod
+    def _move_top_to_edge(config: Dict, target: str, item: Dict, to_top: bool):
+        """把一级提升项移到该 target 的一级项组首/尾，容器及其它 target 项位置不变"""
+        slots = [i for i, m in enumerate(config.get("menuItems", []))
+                 if ContextManager._is_top_item(m) and target in (m.get("target", []) or [])]
+        items = [config["menuItems"][i] for i in slots]
+        idx = next((i for i, menu in enumerate(items) if menu is item), None)
+        if idx is None:
+            return
+        items.pop(idx)
+        if to_top:
+            items.insert(0, item)
+        else:
+            items.append(item)
         for slot, menu in zip(slots, items):
             config["menuItems"][slot] = menu
 

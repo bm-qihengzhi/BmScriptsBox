@@ -10,6 +10,7 @@ import webbrowser
 from PySide2.QtCore import Signal, QObject
 from xsideui import tr
 from app.utils import BmNotify, BmTools, BM_LOG
+from app.utils.pinyin_search import PinyinSearchIndex, HAS_PYPINYIN
 
 
 class ScriptPresenter(QObject):
@@ -26,6 +27,9 @@ class ScriptPresenter(QObject):
         self._execute_workers = {}
         self._uninstall_workers = {}
         self._read_threads = set()
+        self._search_index = PinyinSearchIndex()
+        if not HAS_PYPINYIN:
+            BM_LOG.warning("pypinyin 不可用，脚本卡片搜索仅支持原名匹配")
 
     def lazy_loading(self):
         try:
@@ -62,12 +66,11 @@ class ScriptPresenter(QObject):
         self.scripts_loaded.emit(scripts_data)
 
     def filter_scripts(self, filter_text, all_scripts):
-        if not filter_text:
+        if not filter_text or not filter_text.strip():
             return all_scripts
-        filter_text = filter_text.lower().strip()
         return [
             script for script in all_scripts
-            if filter_text in script.name.lower()
+            if self._search_index.matches(script.name, filter_text)
         ]
 
     def on_banner_clicked(self, index):

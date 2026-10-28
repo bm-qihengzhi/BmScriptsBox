@@ -6,24 +6,25 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 
 参数化启动对话框：脚本声明 [bmscriptsbox.params_form] 后，
 交互式运行时先弹出此表单，收集 params 覆盖值再启动。
-表单布局：一行一个参数，左侧为「参数名（必填 *）+ 描述」标签列。
+表单布局：普通参数一行一个（左侧「参数名（必填 *）+ 描述」标签列），
+布尔开关用流式布局单独成组；内容超过屏幕高度时滚动，底部按钮固定。
 """
 from typing import Any, Dict, List
 
-from PySide2.QtCore import Qt
-from PySide2.QtWidgets import (QVBoxLayout, QHBoxLayout, QWidget)
+from PySide2.QtCore import Qt, QTimer
+from PySide2.QtWidgets import (QApplication, QFrame, QVBoxLayout, QHBoxLayout, QWidget)
 
 from xsideui import (XPushButton, XButtonVariant, XColor, tr, XDialog, XHeaderCard,
-                     XSize, XUpload, XListWidget, XMenu, XIcon, IconName)
+                     XSize, XUpload, XListWidget, XMenu, XIcon, IconName, XScrollArea)
 
 from app.view.params_ui import (build_param_widget, read_param_widget, write_param_widget,
                                 make_label_cell, make_header_row,
-                                field_signal, FieldLinker)
+                                field_signal, FieldLinker, FlowWrapLayout)
 from app.utils.tools import BmTools
 
 
 class ParamsPromptDialog(XDialog):
-    """按脚本 params_schema 自动生成参数设置表单（一行一参数，联动隐藏整行收起）"""
+    """按脚本 params_schema 自动生成参数设置表单（普通参数一行一个，布尔参数流式多选；联动显隐时窗口自动增高/缩回）"""
 
     def __init__(self, script_data, parent=None, default_data=None, prefill_params=None):
         super().__init__(parent)
@@ -34,6 +35,10 @@ class ParamsPromptDialog(XDialog):
         self._pick_upload = None
         self._pick_edit = None
         self._pick_text_row = None
+        self._scroll = None
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._do_fit_dialog_to_content)
 
         self._setup_ui()
         if default_data:
@@ -48,9 +53,13 @@ class ParamsPromptDialog(XDialog):
             icon = BmTools.get_language_icon_path(self.script.language)
         self.set_logo(icon)
 
-        # 内容体（滚动区唯一的内容容器）
         body = QWidget()
-        self.addWidget(body)
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+
+        # 可滚动内容区（唯一的内容容器）
+        content = QWidget()
         inputs = list(self.script.inputs_schema or [])
         help_btn = XPushButton(icon=IconName.HELP , variant=XButtonVariant.TEXT,
                                color=XColor.SECONDARY, size=XSize.SMALL)
@@ -58,7 +67,7 @@ class ParamsPromptDialog(XDialog):
         help_btn.clicked.connect(self._open_detail)
         if any(i.get('pick') for i in inputs):
             # 左右布局：左侧 XUpload（选中后切 textedit），右侧 参数/非 pick 输入
-            hlay = QHBoxLayout(body)
+            hlay = QHBoxLayout(content)
             hlay.setContentsMargins(20, 20, 20, 11)
             hlay.setSpacing(16)
             pick_inp = next(i for i in inputs if i.get('pick'))
@@ -71,41 +80,152 @@ class ParamsPromptDialog(XDialog):
         else:
             # 垂直堆叠：数据输入 + 运行参数
             self.title_bar.add_widget(help_btn)
-            self.setMinimumWidth(380)
-            vlay = QVBoxLayout(body)
+            vlay = QVBoxLayout(content)
             vlay.setContentsMargins(20, 20, 20, 11)
             vlay.setSpacing(20)
             vlay.addWidget(self._build_params_form(inputs))
             vlay.addStretch()
 
+        scroll = XScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.set_scrollbar_visible(True, False)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        self._scroll = scroll
+        self._linker.add_relayout_callback(self._fit_dialog_to_content)
+        body_layout.addWidget(scroll, 1)
+
+        # 按钮固定在底部，参数再多也始终可见
+        self._footer = self._build_footer()
+        body_layout.addLayout(self._footer, 0)
+
+        self.setMinimumWidth(380)
+        self.addWidget(body)
+
+        # 尽量占满屏幕可用高度；只有实在放不下时才由滚动区兜底
+        max_h = max(200, self._available_screen_height() - 48)
+        self.setMaximumHeight(max_h)
+        self._apply_initial_size(content, max_h)
+
         # 后台触发（热键/右键）时盒子非前台应用，置顶防被其它程序遮挡
         self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         self.raise_()
 
-    def _build_params_form(self, nonpick_inputs: List[Dict]) -> QWidget:
-        """参数区：非 pick 的 inputs（堆叠）+ 运行参数（VBox 行 + 联动，隐藏时整行收起）"""
+    def _build_footer(self) -> QHBoxLayout:
+        """固定底部按钮：取消 / 运行"""
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(20, 8, 20, 16)
+        btn_row.setSpacing(8)
+        btn_row.addStretch()
+        cancel_btn = XPushButton(text=tr('Cancel'), variant=XButtonVariant.OUTLINED, color=XColor.SECONDARY)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+        run_btn = XPushButton(text=tr('Run'))
+        run_btn.clicked.connect(self.accept)
+        btn_row.addWidget(run_btn)
+        return btn_row
 
+    def _target_screen(self):
+        """优先取父窗口所在屏幕，多显示器下尺寸上限才准确"""
+        parent = self.parentWidget()
+        if parent is not None:
+            screen = QApplication.screenAt(parent.window().frameGeometry().center())
+            if screen is not None:
+                return screen
+        return QApplication.primaryScreen()
+
+    def _available_screen_height(self) -> int:
+        screen = self._target_screen()
+        return screen.availableGeometry().height() if screen is not None else 800
+
+    def _chrome_height(self) -> int:
+        """标题栏 + 底部按钮 + 阴影/边距占用的高度"""
+        return self.title_bar.sizeHint().height() + self._footer.sizeHint().height() + 8
+
+    def _measured_content_height(self, content: QWidget, width: int) -> int:
+        """内容在指定宽度下的真实高度（流式布局换行后的高度不能只看 sizeHint）"""
+        height = content.sizeHint().height()
+        if content.hasHeightForWidth():
+            height = max(height, content.heightForWidth(width))
+        return height
+
+    def _apply_initial_size(self, content: QWidget, max_h: int):
+        """按内容高度定初始尺寸；超过屏幕上限时由滚动区接管"""
+        screen = self._target_screen()
+        avail_w = screen.availableGeometry().width() if screen is not None else 1280
+        hint = content.sizeHint()
+        width = max(380, min(hint.width(), int(avail_w * 0.9)))
+
+        content_h = self._measured_content_height(content, width)
+        self.resize(width, min(content_h + self._chrome_height(), max_h))
+
+    def _fit_dialog_to_content(self):
+        """联动显隐后安排一次高度同步（等布局重算完，避免读到旧尺寸）"""
+        if self._scroll is not None:
+            self._fit_timer.start(0)
+
+    def _do_fit_dialog_to_content(self):
+        """同步内容与窗口高度：内容变高窗口长高，变矮窗口缩回"""
+        scroll = self._scroll
+        if scroll is None:
+            return
+        content = scroll.widget()
+        if content is None:
+            return
+
+        width = content.width()
+        content_h = self._measured_content_height(content, width)
+        content.resize(width, content_h)
+        content.updateGeometry()
+
+        target_h = min(content_h + self._chrome_height(), self.maximumHeight())
+        if target_h == self.height():
+            return
+        self._resize_keep_visible(target_h)
+
+    def _resize_keep_visible(self, target_h: int):
+        """调整窗口高度，保持左上角并确保整窗落在屏幕可用区域内"""
+        self.resize(self.width(), target_h)
+        actual_h = self.height()
+
+        screen = self._target_screen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        x = max(avail.left(), min(self.x(), avail.right() - self.width() + 1))
+        y = max(avail.top(), min(self.y(), avail.bottom() - actual_h + 1))
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
+
+    def _build_params_form(self, nonpick_inputs: List[Dict]) -> QWidget:
+        """参数区：非 pick 的 inputs（堆叠）+ 普通参数（VBox 行）+ 布尔参数（流式多选）"""
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(16)
 
-
         if nonpick_inputs:
             lay.addWidget(self._build_nonpick_inputs(nonpick_inputs))
 
-        if self.script.params_schema:
+        bool_params = []
+        other_params = []
+        for param in self.script.params_schema or []:
+            name = param.get('name', '')
+            if not name:
+                continue
+            if str(param.get('type', 'str')).lower() == 'bool':
+                bool_params.append(param)
+            else:
+                other_params.append(param)
+
+        if other_params:
             form_box = QVBoxLayout()
             form_box.setContentsMargins(0, 0, 0, 0)
             form_box.setSpacing(6)
-            for param in self.script.params_schema or []:
+            for param in other_params:
                 name = param.get('name', '')
-                if not name:
-                    continue
                 ptype = str(param.get('type', 'str')).lower()
                 wg = build_param_widget(param)
-                if ptype == 'bool':
-                    wg.setText('')  # 标签列已展示参数名，去掉开关自带文本避免重复
                 self._widgets[name] = (wg, ptype)
                 label_cell = self._make_label_cell(
                     name, param.get('label', '') or '', bool(param.get('required', False)))
@@ -120,21 +240,38 @@ class ParamsPromptDialog(XDialog):
                 # row 让联动隐藏时整行收起（QFormLayout 会留空行，VBox 行容器不会）
                 self._linker.add(name, param, label_cell, wg, field_signal(wg), row=row)
             lay.addLayout(form_box)
+
+        if bool_params:
+            lay.addWidget(self._build_bool_flow(bool_params))
+
         lay.addStretch()
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        cancel_btn = XPushButton(text=tr('Cancel'),variant=XButtonVariant.OUTLINED, color=XColor.SECONDARY)
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
-        run_btn = XPushButton(text=tr('Run'))
-        run_btn.clicked.connect(self.accept)
-        btn_row.addWidget(run_btn)
-        lay.addLayout(btn_row, 0)
-
         self._linker.wire()
         self._linker.apply()
         return w
+
+    def _build_bool_flow(self, bool_params: List[Dict]) -> QWidget:
+        """布尔开关单独用流式布局：一行多个，随宽度自动换行"""
+        box = QWidget()
+        flow = FlowWrapLayout(box)
+        flow.setContentsMargins(0, 0, 0, 0)
+        flow.setSpacing(8)
+        self._linker.add_relayout(flow)
+
+        for param in bool_params:
+            name = param.get('name', '')
+            wg = build_param_widget(param)
+            display = param.get('label') or name
+            if param.get('required'):
+                display = f"{display} *"
+            wg.setText(display)
+            desc = param.get('description') or ''
+            if desc:
+                wg.setToolTip(desc)
+            wg.setMinimumWidth(120)
+            self._widgets[name] = (wg, 'bool')
+            flow.addWidget(wg)
+            self._linker.add(name, param, wg, wg, field_signal(wg), row=wg)
+        return box
 
     def _build_nonpick_inputs(self, inputs: List[Dict]) -> QWidget:
         """非 pick 的 inputs：堆叠（标签行在上、字段整行在下）"""

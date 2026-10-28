@@ -57,7 +57,7 @@ class ContextModel:
         self.load_menu_data()
 
     def move_menu_item(self, script_id: str, direction: str, target: str) -> str:
-        """移动菜单项，返回 ok | first | last | boundary | not_found"""
+        """移动菜单项（up/down/top/bottom），返回 ok | first | last | boundary | not_found"""
         result = self.menu_manager.move_menu_item(script_id, direction, target)
         if result == 'ok':
             self.load_menu_data()

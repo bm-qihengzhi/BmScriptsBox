@@ -54,17 +54,36 @@ class MenuPresenter(QObject):
         """下移菜单项"""
         self._do_move(script_id, 'down')
 
+    def on_move_top(self, script_id: str):
+        """置顶菜单项（本层级分组内）"""
+        self._do_move(script_id, 'top')
+
+    def on_move_bottom(self, script_id: str):
+        """置底菜单项（本层级分组内）"""
+        self._do_move(script_id, 'bottom')
+
     def _do_move(self, script_id: str, direction: str):
         result = self.model.move_menu_item(script_id, direction, self._current_target)
         if result == 'ok':
-            self.notification.emit(
-                "菜单上移成功" if direction == 'up' else "菜单下移成功", "success")
+            success_messages = {
+                'up': "菜单上移成功",
+                'down': "菜单下移成功",
+                'top': "菜单置顶成功",
+                'bottom': "菜单置底成功",
+            }
+            self.notification.emit(success_messages.get(direction, "菜单移动成功"), "success")
             self.refresh_data()
             self.action_completed.emit("move", True, direction)
         elif result == 'first':
-            self.notification.emit("第一行无法上移", "warning")
+            if direction == 'top':
+                self.notification.emit("已经在分组顶部，无需置顶", "warning")
+            else:
+                self.notification.emit("第一行无法上移", "warning")
         elif result == 'last':
-            self.notification.emit("最后一行无法下移", "warning")
+            if direction == 'bottom':
+                self.notification.emit("已经在分组底部，无需置底", "warning")
+            else:
+                self.notification.emit("最后一行无法下移", "warning")
         elif result == 'boundary':
             self.notification.emit("无法跨越一/二级分组移动", "warning")
         else:

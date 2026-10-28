@@ -7,11 +7,11 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import json
 from typing import Any, Dict
 
-from PySide2.QtCore import Qt
+from PySide2.QtCore import Qt, QPoint, QRect, QSize
 from PySide2.QtGui import QCursor
 from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
 
-from xsideui import XCheckBox, XDoubleSpinBox, XSpinBox, XComboBox, XLineEdit, XTextEdit, XLabel, XMenu
+from xsideui import XCheckBox, XDoubleSpinBox, XSpinBox, XComboBox, XLineEdit, XTextEdit, XLabel, XMenu, XFlowLayout
 
 
 def make_header_row(name: str, label: str, trailing=None) -> QWidget:
@@ -96,12 +96,88 @@ def field_signal(widget):
     return None
 
 
+class FlowWrapLayout(XFlowLayout):
+    """可隐藏项的 XFlowLayout：布局时跳过 isEmpty() 的项，支持联动隐藏后自动重排"""
+
+    def _visible_items(self):
+        return [item for item in self._items if not item.isEmpty()]
+
+    def minimumSize(self):
+        items = self._visible_items()
+        margin = self.contentsMargins()
+        if not items:
+            return QSize(margin.left() + margin.right(), margin.top() + margin.bottom())
+        width = 0
+        height = 0
+        for item in items:
+            size = self._get_item_size(item)
+            width = max(width, size.width())
+            height = max(height, size.height())
+        return QSize(width + margin.left() + margin.right(),
+                     height + margin.top() + margin.bottom())
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def _do_layout(self, rect, test_only=False):
+        items = self._visible_items()
+        if not items:
+            return 0
+
+        margin = self.contentsMargins()
+        available_width = rect.width() - margin.left() - margin.right()
+        spacing = self.spacing()
+        x = rect.x() + margin.left()
+        y = rect.y() + margin.top()
+        row_height = 0
+        row_width = 0
+
+        for item in items:
+            item_size = self._get_item_size(item)
+            if row_width > 0:
+                row_width += spacing
+
+            if row_width + item_size.width() > available_width and row_width > 0:
+                x = rect.x() + margin.left()
+                y += row_height + spacing
+                row_height = 0
+                row_width = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item_size))
+
+            row_height = max(row_height, item_size.height())
+            x += item_size.width() + spacing
+            row_width += item_size.width()
+
+        return y + row_height - rect.y() + margin.bottom()
+
+    def refresh(self):
+        """显隐变化后重算高度并通知父布局"""
+        self.invalidate()
+        parent = self.parentWidget()
+        if parent is not None:
+            parent.updateGeometry()
+
+
 class FieldLinker:
     """FormCreate 式字段联动：带 when 的字段，按被依赖字段当前值整体显隐"""
 
     def __init__(self):
         self._rows = {}   # name -> {'rule':..., 'label':..., 'field':..., 'signal':...}
+        self._relayouts = []
+        self._relayout_callbacks = []
         self._wired = False
+
+    def add_relayout(self, layout):
+        """注册需要随显隐重排的布局（如流式多选区）"""
+        if layout not in self._relayouts:
+            self._relayouts.append(layout)
+
+    def add_relayout_callback(self, callback):
+        """注册重排后的回调（用于同步滚动区内容高度）"""
+        if callback not in self._relayout_callbacks:
+            self._relayout_callbacks.append(callback)
 
     def add(self, name: str, rule: Dict, label_widget, field_widget, signal=None, row=None):
         self._rows[name] = {
@@ -122,16 +198,21 @@ class FieldLinker:
             return None
 
     def wire(self):
-        """把每个带 when 的字段，接到其 when.field 控件的值变化信号"""
+        """把每个被依赖字段接到值变化信号；同一字段只连一次，避免 N 个 when 触发 N 次 apply"""
         if self._wired:
             return
+        wired_refs = set()
         for row in self._rows.values():
             when = (row['rule'] or {}).get('when')
             if not when:
                 continue
-            ref = self._rows.get(when.get('field'))
+            ref_name = when.get('field')
+            if ref_name in wired_refs:
+                continue
+            ref = self._rows.get(ref_name)
             if ref and ref.get('signal'):
                 ref['signal'].connect(lambda *a: self.apply())
+                wired_refs.add(ref_name)
         self._wired = True
 
     def apply(self):
@@ -144,6 +225,10 @@ class FieldLinker:
             else:
                 r['label'].setVisible(v)
                 r['field'].setVisible(v)
+        for layout in self._relayouts:
+            layout.refresh()
+        for callback in self._relayout_callbacks:
+            callback()
 
     def is_visible(self, name: str) -> bool:
         """某字段当前是否可见（收集时跳过不可见字段用）"""

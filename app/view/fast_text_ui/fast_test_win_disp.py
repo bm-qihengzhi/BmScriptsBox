@@ -14,6 +14,7 @@ from xsideui import XLabel, XTableWidget, XMenu, XSwitch, \
 
 from app.data import ProjectGlobal, ScriptDatabase
 from app.utils.tools import BmTools
+from app.utils.pinyin_search import PinyinSearchIndex
 
 
 class FastTextWidget(QWidget):
@@ -21,6 +22,7 @@ class FastTextWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._search_index = PinyinSearchIndex()
         self._setup_ui()
 
     def _setup_ui(self):
@@ -55,20 +57,20 @@ class FastTextWidget(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        # 延迟显示数据
-        QTimer.singleShot(100, lambda: self.update_table(ProjectGlobal.safe_get('SCRIPTS')))
+        # 延迟显示数据，并重新套用当前搜索词
+        QTimer.singleShot(100, self.filter_scripts)
 
     def filter_scripts(self):
-        """搜索脚本"""
-        search_text = self.search_bar.text().strip().lower()
+        """搜索脚本：名称支持中文/全拼/首字母/拼音子串"""
+        search_text = self.search_bar.text().strip()
         all_scripts = ProjectGlobal.safe_get('SCRIPTS') or []
-        filtered_scripts = []
         if not search_text:
             filtered_scripts = all_scripts
         else:
-            for script in all_scripts:
-                if search_text in (script.name or "").lower():
-                    filtered_scripts.append(script)
+            filtered_scripts = [
+                script for script in all_scripts
+                if self._search_index.matches(script.name, search_text)
+            ]
 
         self.update_table(filtered_scripts)
 
@@ -148,14 +150,14 @@ class FastTextWidget(QWidget):
         ScriptDatabase().update_status(script_data.id, 'pin', True)
         scripts = ScriptDatabase().get_all_scripts()
         ProjectGlobal.safe_set('SCRIPTS', scripts)
-        self.update_table(scripts)
+        self.filter_scripts()
 
     def _script_cancel_top(self, script_data):
         """取消脚本置顶"""
         ScriptDatabase().update_status(script_data.id, 'pin', False)
         scripts = ScriptDatabase().get_all_scripts()
         ProjectGlobal.safe_set('SCRIPTS', scripts)
-        self.update_table(scripts)
+        self.filter_scripts()
 
 
 if __name__ == '__main__':

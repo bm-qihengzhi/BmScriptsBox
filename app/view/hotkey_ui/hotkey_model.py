@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from app.data import ProjectGlobal, ScriptDatabase, ScriptEntity
 from app.servers.monitor import HotkeyManager
+from app.utils.pinyin_search import PinyinSearchIndex
 
 
 class HotkeyModel:
@@ -18,6 +19,7 @@ class HotkeyModel:
     def __init__(self):
         self.db = ScriptDatabase()
         self.hotkey_manager = HotkeyManager()
+        self._search_index = PinyinSearchIndex()
 
     def load_scripts(self) -> List[ScriptEntity]:
         """加载所有支持热键排序后的脚本"""
@@ -30,16 +32,18 @@ class HotkeyModel:
         )
 
 
-    def search_scripts(self, keyword: str) -> List[ScriptEntity]:
-        """搜索脚本"""
-        all_scripts = self.load_scripts()
+    def search_scripts(self, keyword: str, scripts: Optional[List[ScriptEntity]] = None) -> List[ScriptEntity]:
+        """搜索脚本：名称支持中文/全拼/首字母，快捷键字段仍按原字符串匹配"""
+        all_scripts = list(scripts) if scripts is not None else self.load_scripts()
+        keyword = (keyword or "").strip()
         if not keyword:
             return all_scripts
 
-        keyword = keyword.lower()
+        keyword_lower = keyword.lower()
         return [
             s for s in all_scripts
-            if keyword in (s.name or "").lower() or keyword in (s.hotkey or "").lower()
+            if self._search_index.matches(s.name, keyword)
+            or keyword_lower in (s.hotkey or "").lower()
         ]
 
     def find_conflict(self, script_id: str, hotkey_key: str):

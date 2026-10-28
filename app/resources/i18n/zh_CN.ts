@@ -229,14 +229,24 @@
         <translation>未知</translation>
     </message>
     <message>
-        <location filename="view/context_ui/contexts_display.py" line="132"/>
+        <location filename="view/context_ui/contexts_display.py" line="145"/>
+        <source>Move to Top</source>
+        <translation>置顶</translation>
+    </message>
+    <message>
+        <location filename="view/context_ui/contexts_display.py" line="150"/>
         <source>Move Up</source>
         <translation>上移</translation>
     </message>
     <message>
-        <location filename="view/context_ui/contexts_display.py" line="137"/>
+        <location filename="view/context_ui/contexts_display.py" line="155"/>
         <source>Move Down</source>
         <translation>下移</translation>
+    </message>
+    <message>
+        <location filename="view/context_ui/contexts_display.py" line="160"/>
+        <source>Move to Bottom</source>
+        <translation>置底</translation>
     </message>
     <message>
         <location filename="view/context_ui/contexts_display.py" line="145"/>

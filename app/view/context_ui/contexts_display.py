@@ -24,6 +24,7 @@ class ContextWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.presenter = MenuPresenter()
+        self._last_menu_script_id = None
         self._setup_ui()
         self._init_presenter_signals()
 
@@ -138,7 +139,13 @@ class ContextWidget(QWidget):
         menu = XMenu(parent=self)
         script_id = row_data.get('scriptId')
         row = row_data.get('row', 0)
+        self._last_menu_script_id = script_id
 
+        menu.add_action(
+            text=tr("Move to Top"),
+            icon=XIcon.get(name=IconName.TO_TOP, color=XColor.TERTIARY).icon(),
+            triggered=lambda: self.presenter.on_move_top(script_id),
+        )
         menu.add_action(
             text=tr("Move Up"),
             icon=XIcon.get(name=IconName.UP_ARROW, color=XColor.TERTIARY).icon(),
@@ -148,6 +155,11 @@ class ContextWidget(QWidget):
             text=tr('Move Down'),
             icon=XIcon.get(name=IconName.DOWN_ARROW, color=XColor.TERTIARY).icon(),
             triggered=lambda: self.presenter.on_move_down(script_id),
+        )
+        menu.add_action(
+            text=tr('Move to Bottom'),
+            icon=XIcon.get(name=IconName.TO_BOTTOM, color=XColor.TERTIARY).icon(),
+            triggered=lambda: self.presenter.on_move_bottom(script_id),
         )
 
         item = self.table_widget.item(row, 2)
@@ -169,13 +181,18 @@ class ContextWidget(QWidget):
 
     def _on_action_completed(self, action: str, success: bool, direction: str):
         if success and action == "move":
-            if direction == "up":
-                current_row = self.table_widget.currentRow()
-                if current_row > 0:
-                    self.table_widget.selectRow(current_row - 1)
-            elif direction == "down":
-                current_row = self.table_widget.currentRow()
-                self.table_widget.selectRow(current_row + 1)
+            row = self._find_row_by_script_id(self._last_menu_script_id)
+            if row >= 0:
+                self.table_widget.selectRow(row)
+
+    def _find_row_by_script_id(self, script_id: str) -> int:
+        if not script_id:
+            return -1
+        for row in range(self.table_widget.rowCount()):
+            item = self.table_widget.item(row, 0)
+            if item and item.data(Qt.UserRole) == script_id:
+                return row
+        return -1
 
     def _on_notification(self, message: str, msg_type: str):
         position = XNotif.Pos.CENTER
