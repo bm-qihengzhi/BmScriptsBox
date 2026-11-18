@@ -6,10 +6,13 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from pathlib import Path
 
+
+
 from xsideui import XPushButton, XLineEdit, XTextEdit, IconName, XButtonVariant, XColor, XDialog, \
-    tr, XCard, XLabel, XTabWidget
-from PySide2.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QApplication, QFormLayout, QGridLayout
+    tr, XCard, XLabel, XTabWidget, XI18N
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QApplication, QFormLayout, QGridLayout
+from PySide6.QtGui import QTextCursor
 
 from app.utils import BmTools
 from app.works.script_work import InstallLocalScriptWork, InstallCloudScriptWork
@@ -64,7 +67,7 @@ class InstallScriptWindow(XDialog):
             except RuntimeError:  # 底层对象已被 deleteLater 释放
                 running = False
             if running:
-                self.append_styled_log('正在安装，请等待完成后再关闭...', 'ERROR')
+                self.append_styled_log(XI18N.x_tr('Installing, please wait before closing...'), 'ERROR')
                 event.ignore()
                 return
         super().closeEvent(event)
@@ -96,10 +99,10 @@ class InstallScriptWindow(XDialog):
                     self.tab.setCurrentIndex(0)
                 event.acceptProposedAction()
                 return
-        self.append_styled_log('错误：只支持拖入 .zip 压缩包', 'ERROR')
+        self.append_styled_log(XI18N.x_tr('Error: only .zip archives can be dropped here'), 'ERROR')
 
     def _setup_ui(self):
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(420)
         self.set_title(tr('Install Script Log'))
         self.set_logo(BmTools.get_logo_path())
         self.hide_maximize_button()
@@ -140,7 +143,7 @@ class InstallScriptWindow(XDialog):
         self.script_path_input = XLineEdit(placeholder=tr("Quick install via .zip file"))
         self.script_path_input.setAcceptDrops(False)
         self.btn_browse = XPushButton(icon=IconName.FOLDER, variant=XButtonVariant.FILLED, color=XColor.TERTIARY)
-        self.btn_local = XPushButton(tr('Install'), variant=XButtonVariant.FILLED)
+        self.btn_local = XPushButton(tr('Install'))
         self.btn_browse.clicked.connect(self._browse_file)
         self.btn_local.clicked.connect(self.install_local_script)
         lay.addWidget(self.script_path_input,0,0)
@@ -153,20 +156,20 @@ class InstallScriptWindow(XDialog):
         lay_git = QGridLayout(self.git_pane)
         lay_git.setContentsMargins(0, 11, 0, 11)
         lay_git.setSpacing(11)
-        lay_git.addWidget(XLabel(tr('Repo url:'), parent=self), 0,0)
+        lay_git.addWidget(XLabel(tr('Repo URL:'), parent=self), 0,0)
         self.git_input = XLineEdit(placeholder=tr("GitHub repo URL only (HTTPS)"))
         self.git_input.setAcceptDrops(False)
         lay_git.addWidget(self.git_input, 0 , 1, 1, 2)
         lay_git.addWidget(XLabel(tr('Repo branch:'), parent=self), 1, 0)
-        self.branch_input = XLineEdit(placeholder=tr("default to main"))
+        self.branch_input = XLineEdit(placeholder=tr("defaults to main"))
         self.branch_input.setAcceptDrops(False)
         lay_git.addWidget(self.branch_input, 1, 1)
         self.install_git = XPushButton(tr('Install'), variant=XButtonVariant.FILLED)
         self.install_git.clicked.connect(self.install_git_script)
         lay_git.addWidget(self.install_git, 1, 2)
 
-        self.tab.addTab(self.local_pane, '从本地安装')
-        self.tab.addTab(self.git_pane, '从仓库安装')
+        self.tab.addTab(self.local_pane, XI18N.x_tr('Local Install'))
+        self.tab.addTab(self.git_pane, XI18N.x_tr('From Repository'))
         return self.tab
 
     def _browse_file(self):
@@ -176,7 +179,7 @@ class InstallScriptWindow(XDialog):
         dialog.setNameFilter("Python Files (*.zip)")
         dialog.setWindowModality(Qt.WindowModal)
 
-        if dialog.exec_():
+        if dialog.exec():
             self.script_path_input.setText(dialog.selectedFiles()[0])
 
     def install_git_script(self):
@@ -185,18 +188,18 @@ class InstallScriptWindow(XDialog):
         git_url = self.git_input.text().strip()
         branch = self.branch_input.text().strip() or "main"
         if not git_url:
-            self.terminal.append('错误：未填写仓库地址')
+            self.terminal.append(XI18N.x_tr('Error: repository URL is required'))
             return
         if not git_url.startswith("https"):
-            self.terminal.append('错误：只支持https开头的仓库地址')
+            self.terminal.append(XI18N.x_tr('Error: repository URL must start with https'))
             return
         if not 'github.com' in git_url:
-            self.terminal.append('错误：只支持GitHub仓库')
+            self.terminal.append(XI18N.x_tr('Error: only GitHub repositories are supported'))
             return
 
         self.install_git.set_loading(True)
         self.terminal.clear()
-        self.append_styled_log("准备从仓库安装脚本...", "STAGE")
+        self.append_styled_log(XI18N.x_tr("Preparing to install from repository..."), "STAGE")
         self.git_install_work = InstallGitScriptWork(git_url=git_url,branch=branch)
         self.git_install_work.finished_signal.connect(self._install_complete)
         self.git_install_work.progress_signal.connect(self._install_progress)
@@ -204,13 +207,13 @@ class InstallScriptWindow(XDialog):
         self.git_install_work.finished.connect(self.git_install_work.deleteLater)
         self.git_install_work.start()
 
-        self.terminal.append("正在安装脚本...")
-        self.terminal.append("请勿关闭此窗口...")
+        self.terminal.append(XI18N.x_tr("Installing script..."))
+        self.terminal.append(XI18N.x_tr("Please keep this window open..."))
 
     def install_cloud_script(self, script_id: str, script_git_url: str, branch: str = 'main'):
         """安装云端脚本"""
         self.terminal.clear()
-        self.append_styled_log("准备从脚本库安装脚本...", "STAGE")
+        self.append_styled_log(XI18N.x_tr("Preparing to install from the script library..."), "STAGE")
         self.could_install_work = InstallCloudScriptWork(script_id=script_id, script_git_url=script_git_url,
                                                          branch=branch)
         self.could_install_work.finished_signal.connect(self._install_complete)
@@ -219,26 +222,26 @@ class InstallScriptWindow(XDialog):
         self.could_install_work.finished.connect(self.could_install_work.deleteLater)
         self.could_install_work.start()
 
-        self.terminal.append("正在安装脚本...")
-        self.terminal.append("请勿关闭此窗口...")
+        self.terminal.append(XI18N.x_tr("Installing script..."))
+        self.terminal.append(XI18N.x_tr("Please keep this window open..."))
 
     def install_local_script(self):
         """安装本地脚本"""
         script_path = self.script_path_input.text().strip()
         if not script_path:
-            self.terminal.append('错误：请选择本地脚本文件路径')
+            self.terminal.append(XI18N.x_tr('Error: select a local script file'))
             return
 
         if not Path(script_path).exists():
-            self.terminal.append('错误：脚本文件不存在')
+            self.terminal.append(XI18N.x_tr('Error: script file does not exist'))
             return
 
         if not script_path.endswith(".zip"):
-            self.terminal.append('错误：只支持zip压缩包')
+            self.terminal.append(XI18N.x_tr('Error: only .zip archives are supported'))
             return
         self.btn_local.set_loading(True)
         self.terminal.clear()
-        self.append_styled_log("准备安装本地脚本...", "STAGE")
+        self.append_styled_log(XI18N.x_tr("Preparing to install local script..."), "STAGE")
 
         self.install_work = InstallLocalScriptWork(script_path)
         self.install_work.progress_signal.connect(self._install_progress)
@@ -247,8 +250,8 @@ class InstallScriptWindow(XDialog):
         self.install_work.finished.connect(self.install_work.deleteLater)
         self.install_work.start()
 
-        self.terminal.append("正在安装脚本...")
-        self.terminal.append("请勿关闭此窗口...")
+        self.terminal.append(XI18N.x_tr("Installing script..."))
+        self.terminal.append(XI18N.x_tr("Please keep this window open..."))
 
     def _install_progress(self, progress: dict):
         """
@@ -275,10 +278,10 @@ class InstallScriptWindow(XDialog):
         from app.view.script_ui.binary_consent_dialog import BinaryConsentDialog
         try:
             dialog = BinaryConsentDialog(payload, parent=self)
-            dialog.exec_()
+            dialog.exec()
             allow, remember = dialog.get_result()
         except Exception as e:
-            self.append_styled_log(f"二进制确认弹窗异常: {e}", "ERROR")
+            self.append_styled_log(XI18N.x_tr("Binary consent dialog error: %1").replace("%1", str(e)), "ERROR")
             allow, remember = False, False
         payload['_result'] = {'allow': allow, 'remember': remember}
         ev = payload.get('_event')
@@ -294,13 +297,14 @@ class InstallScriptWindow(XDialog):
         if callback_data["status"]:
             msg = callback_data.get("msg", tr("Installation Successful"))
             self.append_styled_log(msg, "SUCCESS")
-            self.append_styled_log(tr("安装窗口将于三秒后自动关闭..."), "INFO")
+            self.append_styled_log(XI18N.x_tr("This window will close in 3 seconds..."), "INFO")
 
             self.success_signal.emit({"state": True, "message": "OK"})
             QTimer.singleShot(3000, self.close)
         else:
             error_msg = callback_data.get("msg", tr("Unknown Error"))
-            self.append_styled_log(f"{tr('Installation Failed')}: {error_msg}", "ERROR")
+            self.append_styled_log(
+                XI18N.x_tr("Installation failed: %1").replace("%1", error_msg), "ERROR")
             self.success_signal.emit({"state": False, "message": "Failed"})
 
     def append_styled_log(self, text: str, color_key: str = "INFO"):
@@ -338,4 +342,5 @@ class InstallScriptWindow(XDialog):
         else:
             self.terminal.append(html)
 
-        self.terminal.moveCursor(self.terminal.textCursor().End)
+        # self.terminal.moveCursor(self.terminal.textCursor().End)
+        self.terminal.moveCursor(QTextCursor.MoveOperation.End)

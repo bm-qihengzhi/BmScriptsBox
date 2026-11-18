@@ -11,6 +11,15 @@ $AppName = $AppName.Trim("'").Trim('"')
 $SourceDir = $SourceDir.Trim("'").Trim('"')
 $TargetDir = $TargetDir.Trim("'").Trim('"')
 
+
+# 0.1 系统版本检查（1.5.0 起需要 Windows 10 1809+）
+if ([System.Environment]::OSVersion.Version.Build -lt 17763) {
+    Write-Host "当前系统版本过低：1.5.0 起需要 Windows 10 1809 或更高版本" -ForegroundColor Yellow
+    Write-Host "按任意键退出..." -ForegroundColor Gray
+    try { $null = [Console]::ReadKey() } catch { }
+    exit 1
+}
+
 # 1. 智能权限判断
 function Test-RequiresAdmin {
     param([string]$Path)
@@ -79,19 +88,51 @@ while ($retryCount -lt 5) {
     $retryCount++
 }
 
-# 3. 备份阶段
+# 3. 备份阶段（放在安装目录内，避免 %TEMP% 被清理后无法回滚）
 Write-Header "更新阶段"
 Write-Step "2/4" "创建系统快照 (备份)..."
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$backupDir = Join-Path $env:TEMP "$($AppName)_backup_$timestamp"
-New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-Write-Success "临时备份点: $backupDir"
+$backupDir = Join-Path $TargetDir "BmLogs\update\$timestamp"
+try {
+    New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
+} catch {
+    # 安装目录不可写时回退到用户目录
+    $backupDir = Join-Path $env:LOCALAPPDATA "BmScriptsBox\update_backup\$timestamp"
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+}
+Write-Success "备份目录: $backupDir"
 
 # 4. 执行更新
 Write-Step "3/4" "正在部署新版本文件..."
 try {
     $fullSource = (Get-Item -Path $SourceDir).FullName
-    $files = Get-ChildItem -Path $fullSource -Recurse | Where-Object { !$_.PSIsContainer }
+
+    # 运行时整包替换（archives/runtime.zip）
+    $runtimeArchive = Join-Path $fullSource "archives\runtime.zip"
+    if (Test-Path $runtimeArchive) {
+        Write-Step "3/4" "正在替换运行时..."
+        $runtimeDir = Join-Path $TargetDir "runtime"
+        $runtimeNew = Join-Path $TargetDir "runtime.new"
+        $runtimeOld = Join-Path $TargetDir "runtime.old"
+        if (Test-Path $runtimeNew) { Remove-Item -Path $runtimeNew -Recurse -Force }
+        if (Test-Path $runtimeOld) { Remove-Item -Path $runtimeOld -Recurse -Force }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($runtimeArchive, $runtimeNew)
+        if (!(Test-Path (Join-Path $runtimeNew "BmScriptsBox.exe"))) {
+            throw "运行时包校验失败：缺少 BmScriptsBox.exe"
+        }
+        if (Test-Path $runtimeDir) {
+            Rename-Item -Path $runtimeDir -NewName "runtime.old" -Force
+        }
+        Rename-Item -Path $runtimeNew -NewName "runtime" -Force
+        Write-Success "运行时已替换"
+    }
+
+    # removed.json 是给下面的删除步骤用的控制文件，不能复制到安装目录
+    $removedFile = Join-Path $fullSource "removed.json"
+    $files = Get-ChildItem -Path $fullSource -Recurse | Where-Object {
+        !$_.PSIsContainer -and $_.FullName -notmatch '\\archives\\' -and $_.FullName -ne $removedFile
+    }
     $totalFiles = $files.Count
     $currentFile = 0
 
@@ -110,32 +151,84 @@ try {
         # 确保目录存在
         if (!(Test-Path $targetFileDir)) { New-Item -ItemType Directory -Path $targetFileDir -Force | Out-Null }
 
-        # 更新操作（带重试机制）
-        $moveSuccess = $false
+        # 更新操作：用 Copy 而不是 Move，保留下载目录作为回滚源
         try {
-            Move-Item -Path $file.FullName -Destination $targetPath -Force -ErrorAction Stop
-            $moveSuccess = $true
+            Copy-Item -Path $file.FullName -Destination $targetPath -Force -ErrorAction Stop
             Write-Host "  → [$currentFile/$totalFiles] " -NoNewline -ForegroundColor Gray
             Write-Host $relativePath -ForegroundColor Green
         }
         catch {
             Write-Warning "文件锁定，正在等待重试..."
             Start-Sleep -Seconds 1
-            Move-Item -Path $file.FullName -Destination $targetPath -Force
+            Copy-Item -Path $file.FullName -Destination $targetPath -Force
             Write-Success $relativePath
         }
+    }
+
+    # 5. 执行删除清单（removed.json）：只删清单内、且位于安装目录内的路径
+    if (Test-Path $removedFile) {
+        Write-Info "清理旧版本文件..."
+        $removedItems = @()
+        try {
+            $raw = Get-Content -Path $removedFile -Raw -Encoding UTF8
+            $parsed = $raw | ConvertFrom-Json
+            if ($null -ne $parsed) { $removedItems = @($parsed) }
+        } catch {
+            Write-Warning "删除清单解析失败，跳过: $($_.Exception.Message)"
+        }
+
+        $protectedDirs = @('bmdata', 'bmscripts', 'bmpackages', 'bmlogs', 'bmcache', 'bmcontext')
+        $targetNorm = [System.IO.Path]::GetFullPath($TargetDir)
+        $removedCount = 0
+        foreach ($rel in $removedItems) {
+            if ($rel -isnot [string]) { continue }
+            $clean = ($rel -replace '/', '\').Trim()
+            if ([string]::IsNullOrWhiteSpace($clean)) { continue }
+            if ([System.IO.Path]::IsPathRooted($clean) -or $clean -match '\.\.') {
+                Write-Warning "跳过非法删除项: $rel"
+                continue
+            }
+            $first = ($clean -split '\\')[0].ToLower()
+            if ($protectedDirs -contains $first) {
+                Write-Warning "跳过受保护删除项: $rel"
+                continue
+            }
+            $fullPath = [System.IO.Path]::GetFullPath((Join-Path $TargetDir $clean))
+            if (-not $fullPath.StartsWith($targetNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-Warning "跳过越界删除项: $rel"
+                continue
+            }
+            if (-not (Test-Path $fullPath)) { continue }
+            try {
+                $backupPath = Join-Path $backupDir $clean
+                New-Item -ItemType Directory -Path (Split-Path $backupPath) -Force | Out-Null
+                Copy-Item -Path $fullPath -Destination $backupPath -Recurse -Force
+                Remove-Item -Path $fullPath -Recurse -Force
+                $removedCount++
+                Write-Host "  - $rel" -ForegroundColor DarkYellow
+            } catch {
+                Write-Warning "删除失败 $rel : $($_.Exception.Message)"
+            }
+        }
+        Write-Success "已清理 $removedCount 个旧文件/目录"
     }
 }
 catch {
     Write-Host "`n❌ 部署失败!" -ForegroundColor Red -BackgroundColor Black
     Write-Warning "详情: $($_.Exception.Message)"
+    $runtimeDir = Join-Path $TargetDir "runtime"
+    $runtimeOld = Join-Path $TargetDir "runtime.old"
+    if (!(Test-Path $runtimeDir) -and (Test-Path $runtimeOld)) {
+        Rename-Item -Path $runtimeOld -NewName "runtime" -Force
+        Write-Success "运行时已回滚到更新前状态"
+    }
     if (Test-Path $backupDir) {
         Write-Info "正在执行回滚程序..."
         Copy-Item -Path "$backupDir\*" -Destination $TargetDir -Recurse -Force
         Write-Success "系统已恢复至更新前状态。"
     }
     Write-Host "`n按任意键退出..."
-    $null = [Console]::ReadKey()
+    try { $null = [Console]::ReadKey() } catch { }
     exit 1
 }
 
@@ -154,6 +247,9 @@ if (Test-Path $exePath) {
 else {
     Write-Warning "可执行文件不存在: $exePath"
 }
+
+$runtimeOld = Join-Path $TargetDir "runtime.old"
+if (Test-Path $runtimeOld) { Remove-Item -Path $runtimeOld -Recurse -Force -ErrorAction SilentlyContinue }
 
 Write-Host "`n✨ 自动更新已完成！" -ForegroundColor Cyan
 Write-Host "────────────────────────────────────────────────────────" -ForegroundColor Cyan

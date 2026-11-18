@@ -6,9 +6,9 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import webbrowser
 import json
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
-from PySide2.QtCore import Qt, QUrl, QThread, Signal, QTimer
-from PySide2.QtGui import QDesktopServices
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from PySide6.QtCore import Qt, QUrl, QThread, Signal, QTimer
+from PySide6.QtGui import QDesktopServices
 from xsideui import XImage, XLabel, tr, XPushButton, XButtonVariant, XColor, IconName
 from app.utils import BmTools, BM_LOG
 from app.data import ProjectGlobal
@@ -43,24 +43,23 @@ class AboutWidget(QWidget):
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(11)
-        soft_ico = XImage(source=BmTools.get_logo_path())
-        soft_ico.setFixedSize(60, 60)
+        soft_ico = XImage(source=BmTools.get_logo_path(),min_size=72)
         layout.addStretch()
         layout.addWidget(soft_ico, alignment=Qt.AlignVCenter | Qt.AlignHCenter)
-        layout.addWidget(XLabel(tr('BmScriptsBox'), XLabel.Style.H3), alignment=Qt.AlignCenter)
+        layout.addWidget(XLabel(tr('BmScriptsBox'), XLabel.Style.H1), alignment=Qt.AlignCenter)
         self.version_label = XLabel('0.0.1', XLabel.Style.CAPTION)
         layout.addWidget(self.version_label, alignment=Qt.AlignCenter)
 
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(0, 20, 0, 0)
-        self.website_btn = XPushButton(tr('Website'), variant=XButtonVariant.FILLED, size="small",
-                                       color=XColor.TERTIARY)
+        self.website_btn = XPushButton(tr('Website'), variant=XButtonVariant.FILLED,
+                                       color=XColor.SECONDARY, icon=IconName.BROWSER)
 
-        self.help_btn = XPushButton(tr('Help'), variant=XButtonVariant.FILLED, size="small", color=XColor.TERTIARY)
+        self.help_btn = XPushButton(tr('Help'), variant=XButtonVariant.FILLED,  color=XColor.SECONDARY, icon=IconName.HELP)
 
-        self.licenses_btn = XPushButton(tr('Licenses'), variant=XButtonVariant.FILLED, size="small",color=XColor.TERTIARY)
+        self.licenses_btn = XPushButton(tr('Licenses'), variant=XButtonVariant.FILLED, color=XColor.SECONDARY, icon=IconName.ABNORMAL)
 
-        self.github_btn = XPushButton('GitHub', variant=XButtonVariant.FILLED, size="small", color=XColor.TERTIARY,
+        self.github_btn = XPushButton('GitHub', variant=XButtonVariant.FILLED,  color=XColor.SECONDARY,
                                       icon=IconName.GITHUB)
 
         btn_layout.addStretch()
@@ -71,11 +70,9 @@ class AboutWidget(QWidget):
         btn_layout.addStretch()
 
         layout.addLayout(btn_layout)
-        layout.addWidget(XLabel('本软件已开源，欢迎 Star & PR').set_color(
-                XColor.TERTIARY), alignment=Qt.AlignCenter)
+        layout.addWidget(XLabel(tr('This project is open source - stars and PRs welcome')), alignment=Qt.AlignCenter)
         layout.addWidget(
-            XLabel('基于 MIT + Commons Clause 许可证发布 | © 2026 瞎忙软件开发工作室', style=XLabel.Style.BODY).set_color(
-                XColor.TERTIARY),
+            XLabel(tr('Released under MIT + Commons Clause | (c) 2026 XiaMang Software Studio')),
             alignment=Qt.AlignCenter)
         layout.addStretch()
 

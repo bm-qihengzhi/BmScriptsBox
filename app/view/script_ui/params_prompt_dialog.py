@@ -11,15 +11,17 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from typing import Any, Dict, List
 
-from PySide2.QtCore import Qt, QTimer
-from PySide2.QtWidgets import (QApplication, QFrame, QVBoxLayout, QHBoxLayout, QWidget)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (QApplication, QFrame, QVBoxLayout, QHBoxLayout, QWidget)
 
-from xsideui import (XPushButton, XButtonVariant, XColor, tr, XDialog, XHeaderCard,
-                     XSize, XUpload, XListWidget, XMenu, XIcon, IconName, XScrollArea)
+from xsideui import (XPushButton, XButtonVariant, XColor, tr, XDialog, XHeaderCard, XI18N,
+                     XSize, XUpload, XListWidget, XMenu, XIcon, IconName, XScrollArea,
+                     XMessageBox)
 
 from app.view.params_ui import (build_param_widget, read_param_widget, write_param_widget,
                                 make_label_cell, make_header_row,
                                 field_signal, FieldLinker, FlowWrapLayout)
+from app.utils.badge import is_local_badge
 from app.utils.tools import BmTools
 
 
@@ -63,7 +65,7 @@ class ParamsPromptDialog(XDialog):
         inputs = list(self.script.inputs_schema or [])
         help_btn = XPushButton(icon=IconName.HELP , variant=XButtonVariant.TEXT,
                                color=XColor.SECONDARY, size=XSize.SMALL)
-        help_btn.setToolTip(tr('查看脚本详情'))
+        help_btn.setToolTip(XI18N.x_tr('View script details'))
         help_btn.clicked.connect(self._open_detail)
         if any(i.get('pick') for i in inputs):
             # 左右布局：左侧 XUpload（选中后切 textedit），右侧 参数/非 pick 输入
@@ -73,7 +75,7 @@ class ParamsPromptDialog(XDialog):
             pick_inp = next(i for i in inputs if i.get('pick'))
             hlay.addWidget(self._build_pick_panel(pick_inp), 1)
 
-            input_card = XHeaderCard(title="执行参数", header_padding=(11, 6, 11, 6))
+            input_card = XHeaderCard(title=tr("Script parameters"), header_padding=(11, 6, 11, 6))
             input_card.addWidget(self._build_params_form([i for i in inputs if not i.get('pick')]))
             input_card.addWidget(help_btn, target=XHeaderCard.CardPosition.HEADER)
             hlay.addWidget(input_card, 0)
@@ -101,6 +103,8 @@ class ParamsPromptDialog(XDialog):
 
         self.setMinimumWidth(380)
         self.addWidget(body)
+        # 回车 = 运行：必须在按钮完成挂载后设置，否则会被标题栏按钮占住的默认按钮位置覆盖
+        self._run_btn.setDefault(True)
 
         # 尽量占满屏幕可用高度；只有实在放不下时才由滚动区兜底
         max_h = max(200, self._available_screen_height() - 48)
@@ -118,12 +122,26 @@ class ParamsPromptDialog(XDialog):
         btn_row.setSpacing(8)
         btn_row.addStretch()
         cancel_btn = XPushButton(text=tr('Cancel'), variant=XButtonVariant.OUTLINED, color=XColor.SECONDARY)
+        cancel_btn.setAutoDefault(False)   # 否则它会成为 QDialog 的默认按钮：回车 = 取消
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
         run_btn = XPushButton(text=tr('Run'))
-        run_btn.clicked.connect(self.accept)
+        run_btn.clicked.connect(self._on_run_clicked)
+        self._run_btn = run_btn
         btn_row.addWidget(run_btn)
         return btn_row
+
+    def _on_run_clicked(self):
+        """运行前校验必填与 choices（与 HTTP / 定时任务同一口径），不通过则提示且不关闭"""
+        from app.utils.params_validate import validate_params
+        # 联动隐藏的字段不参与校验：作者已用 when 声明该分支不需要它
+        schema = [pd for pd in (self.script.params_schema or [])
+                  if self._linker.is_visible(pd.get('name', ''))]
+        error = validate_params(schema, self.get_params_overrides())
+        if error:
+            XMessageBox.information(self, tr('Parameter validation'), error)
+            return
+        self.accept()
 
     def _target_screen(self):
         """优先取父窗口所在屏幕，多显示器下尺寸上限才准确"""
@@ -157,7 +175,8 @@ class ParamsPromptDialog(XDialog):
         width = max(380, min(hint.width(), int(avail_w * 0.9)))
 
         content_h = self._measured_content_height(content, width)
-        self.resize(width, min(content_h + self._chrome_height(), max_h))
+        max_content_h = max(120, max_h - self.SHADOW_MARGIN * 2)
+        self.resize_content(width, min(content_h + self._chrome_height(), max_content_h))
 
     def _fit_dialog_to_content(self):
         """联动显隐后安排一次高度同步（等布局重算完，避免读到旧尺寸）"""
@@ -178,14 +197,15 @@ class ParamsPromptDialog(XDialog):
         content.resize(width, content_h)
         content.updateGeometry()
 
-        target_h = min(content_h + self._chrome_height(), self.maximumHeight())
-        if target_h == self.height():
+        max_content_h = max(120, self.maximumHeight() - self.SHADOW_MARGIN * 2)
+        target_h = min(content_h + self._chrome_height(), max_content_h)
+        if target_h == self.content_size().height():
             return
         self._resize_keep_visible(target_h)
 
     def _resize_keep_visible(self, target_h: int):
         """调整窗口高度，保持左上角并确保整窗落在屏幕可用区域内"""
-        self.resize(self.width(), target_h)
+        self.resize_content(self.content_size().width(), target_h)
         actual_h = self.height()
 
         screen = self._target_screen()
@@ -326,7 +346,7 @@ class ParamsPromptDialog(XDialog):
         card = XHeaderCard(title=ilabel or name, header_padding=(11, 6, 11, 6)).addWidget(content)
 
         reselect_btn = XPushButton(icon=IconName.REDO, variant=XButtonVariant.TEXT, size=XSize.SMALL)
-        reselect_btn.setToolTip("重新选择")
+        reselect_btn.setToolTip(XI18N.x_tr('Reselect'))
         reselect_btn.clicked.connect(self._on_reselect_clicked)
         card.addWidget(reselect_btn, target=XHeaderCard.CardPosition.HEADER)
 
@@ -366,25 +386,25 @@ class ParamsPromptDialog(XDialog):
             return
         row = lw.row(item)
         menu = XMenu(parent=lw)
-        menu.add_action(text=tr('上移'),
+        menu.add_action(text=tr('Move up'),
                         icon=XIcon.get(IconName.UP_ARROW, color=XColor.PRIMARY).icon(),
                         triggered=lambda: self._move_pick_item(row, -1))
-        menu.add_action(text=tr('下移'),
+        menu.add_action(text=tr('Move down'),
                         icon=XIcon.get(IconName.DOWN_ARROW, color=XColor.PRIMARY).icon(),
                         triggered=lambda: self._move_pick_item(row, 1))
-        menu.add_action(text=tr('置顶'),
+        menu.add_action(text=tr('Move to top'),
                         icon=XIcon.get(IconName.TO_TOP, color=XColor.PRIMARY).icon(),
                         triggered=lambda: self._move_pick_top(row))
-        menu.add_action(text=tr('置底'),
+        menu.add_action(text=tr('Move to bottom'),
                         icon=XIcon.get(IconName.TO_BOTTOM, color=XColor.PRIMARY).icon(),
                         triggered=lambda: self._move_pick_bottom(row))
-        menu.add_action(text=tr('删除'),
+        menu.add_action(text=tr('Delete'),
                         icon=XIcon.get(IconName.DELETE, color=XColor.DANGER).icon(),
                         triggered=lambda: self._delete_pick_item(row))
-        menu.add_action(text=tr('清空全部'),
+        menu.add_action(text=tr('Clear all'),
                         icon=XIcon.get(IconName.MINUS_CIRCLE, color=XColor.DANGER).icon(),
                         triggered=self._clear_pick_list)
-        menu.exec_(lw.viewport().mapToGlobal(pos))
+        menu.exec(lw.viewport().mapToGlobal(pos))
 
     def _move_pick_item(self, row: int, delta: int):
         """上移(-1)/下移(+1)某行，选中跟随"""
@@ -431,7 +451,7 @@ class ParamsPromptDialog(XDialog):
 
     def _open_detail(self):
         """打开该脚本的社区详情页；本地安装的脚本无详情页，点击无反应"""
-        if self.script.badge == '本地':
+        if is_local_badge(self.script.badge):
             return
         import webbrowser
         from app.data import ProjectGlobal
@@ -465,8 +485,13 @@ class ParamsPromptDialog(XDialog):
         self._show_pick_mode(False)  # 预填后若为 pick 输入，直接展示列表（隐藏 XUpload）
 
     def set_prefill_params(self, prefill: Dict[str, Any]):
-        """把上次确认的 params 记忆值回填到运行参数控件（记忆优先，回退 toml 默认）"""
+        """把上次确认的 params 记忆值回填到运行参数控件（记忆优先，回退 toml 默认）。
+        secret 字段永不回填：历史记忆里可能残留明文，也不该让用户误以为已经存好了"""
+        from app.utils.params_validate import secret_names
+        secrets = secret_names(self.script.params_schema)
         for name, (widget, ptype) in self._widgets.items():
+            if name in secrets:
+                continue
             if name in prefill:
                 write_param_widget(widget, ptype, prefill.get(name))
 

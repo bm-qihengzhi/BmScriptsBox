@@ -10,8 +10,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional, Dict
-from PySide2.QtCore import QObject, Signal, QCoreApplication
-from app.utils import BmTools, BM_LOG
+from PySide6.QtCore import QObject, Signal, QCoreApplication
+from app.utils import BmError, BmTools, BM_LOG
 from app.utils.region import is_china
 from app.servers.packages import PackagesManager
 
@@ -144,7 +144,7 @@ class NodeEnvManager(QObject):
                 break
             if time.time() - _wait_start > timeout:
                 process.kill()
-                raise RuntimeError(f"依赖安装超时（{timeout}秒）")
+                raise BmError('env.pnpm.timeout', seconds=timeout)
             time.sleep(0.05)
 
         stdout_thread.join(timeout=5)
@@ -157,7 +157,7 @@ class NodeEnvManager(QObject):
             stderr_text = '\n'.join(stderr_lines)
             stdout_text = ''.join(stdout_lines)
             error_info = stderr_text or stdout_text
-            raise RuntimeError(f"PNPM 安装退出码({process.returncode}): {error_info}")
+            raise BmError('env.pnpm.install_failed', code=process.returncode)
 
     # --- 内部功能组件 ---
 
@@ -204,14 +204,14 @@ class NodeEnvManager(QObject):
             self.package.packages_progress.connect(self.node_runtime_install_progress.emit)
 
         path = self.package.install_cli('node',spec_str)
-        if not path: raise RuntimeError(f"未能获取到满足 {spec_str} 的 Node.js 运行时")
+        if not path: raise BmError('env.node.no_runtime', spec=spec_str)
         return path
 
     def _get_pnpm_path(self) -> str:
         if not self.package:
             self.package = PackagesManager()
         path = self.package.install_cli('pnpm')
-        if not path: raise RuntimeError("未能获取到 PNPM 工具")
+        if not path: raise BmError('env.pnpm.missing')
         return path
 
     def _emit_progress(self, msg: str, status: bool = True):

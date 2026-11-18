@@ -4,7 +4,7 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
 
 from app.data import ProjectGlobal
 

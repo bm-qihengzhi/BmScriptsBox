@@ -16,8 +16,6 @@ import threading
 import time
 from datetime import datetime
 
-from app.data.database import ConfigDatabase
-from app.data.model import db_path
 from app.utils import BM_LOG, BmNotify
 
 from . import api
@@ -56,6 +54,7 @@ class WechatPushService:
         self._busy = False                     # 同一时刻只允许一个登录/绑定窗口在收发
         self._login_time = 0.0
         self._last_reason = ''
+        from app.data.model import db_path
         self._state_file = db_path.parent / 'weixin_state.json'
         self._state = self._read_file()
         BM_LOG.info('[微信推送] 服务初始化：状态文件=%s 本地登录态=%s 已绑定收件人=%s'
@@ -127,6 +126,7 @@ class WechatPushService:
                 picked = fid
         if not picked:
             try:
+                from app.data.database import ConfigDatabase
                 cfg_to = (ConfigDatabase.get_all().get('wechat_push_to') or '').strip()
             except Exception:
                 cfg_to = ''
@@ -228,7 +228,7 @@ class WechatPushService:
             try:
                 data = api.fetch_qrcode()
             except api.ILinkError as e:
-                return {'ok': False, 'error': '获取二维码失败: %s' % api.redact(e)}
+                return {'ok': False, 'error': '获取二维码失败：%s' % e}
             qrcode = data.get('qrcode')
             if not qrcode:
                 BM_LOG.error('[微信推送] 二维码响应缺少 qrcode，keys=%s' % sorted(data.keys()))
@@ -419,6 +419,7 @@ class WechatPushService:
             self._save_locked()
         BM_LOG.info('[微信推送] 已绑定唯一收件人：%s' % api.redact(to))
         try:
+            from app.data.database import ConfigDatabase
             ConfigDatabase.update_item('wechat_push_to', to)
         except Exception as e:
             BM_LOG.warning('[微信推送] 同步 wechat_push_to 配置失败（不影响推送）: %s' % e)
@@ -455,6 +456,7 @@ class WechatPushService:
             self._login_time = 0.0
             self._save_locked()
         try:
+            from app.data.database import ConfigDatabase
             ConfigDatabase.update_item('wechat_push_to', '')
         except Exception as e:
             BM_LOG.warning('[微信推送] 清空 wechat_push_to 配置失败: %s' % e)
@@ -491,11 +493,11 @@ class WechatPushService:
             else:
                 # context_token 过期没有专用错误码：只有服务端明确回了业务码才怀疑上下文失效，
                 # 网络/超时（code 为 None）不动 rebind 状态；发送成功后该标志会自动清掉。
-                rebind = e.code not in (None, 0)
+                rebind = e.business_code not in (None, 0)
                 with self._lock:
                     self._needs_rebind = rebind
                 self._set_reason('发送失败：%s%s' % (
-                    api.redact(e), '，可点「重新绑定」' if rebind else ''))
+                    e, '，可点「重新绑定」' if rebind else ''))
                 BM_LOG.error('[微信推送] 发送失败: %s' % api.redact(e))
             return False
 
@@ -518,7 +520,7 @@ class WechatPushService:
         if first:
             BM_LOG.warning('[微信推送] token 已失效(-14)，需到推送页重新扫码')
             try:
-                BmNotify().show_warning_notify('微信推送登录已失效，请到推送页重新扫码')
+                BmNotify().show_warning_notify('WeChat push login expired, please scan again on the Push page')
             except Exception:
                 pass
 

@@ -15,6 +15,20 @@ class TimeMode(Enum):
     MONTHLY = "每月执行"
 
 
+WEEKDAY_LABELS = {
+    "周一": "Monday", "周二": "Tuesday", "周三": "Wednesday",
+    "周四": "Thursday", "周五": "Friday", "周六": "Saturday",
+    "周日": "Sunday",
+}
+
+
+def weekday_label(value):
+    """存储值是中文周几，展示时转为当前语言。"""
+    from xsideui import XI18N
+    key = str(value or "")
+    return XI18N.x_tr(WEEKDAY_LABELS.get(key, key))
+
+
 class WeekMode(Enum):
     MONDAY = "周一"
     TUESDAY = "周二"

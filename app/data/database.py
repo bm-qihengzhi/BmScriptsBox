@@ -90,6 +90,7 @@ class ScriptDatabase:
             'is_node': script_info.get('is_node', False),
             'schedule_enabled': script_info.get('schedule_enabled', False),
             'params_form_enabled': script_info.get('params_form_enabled', False),
+            'concurrency': script_info.get('concurrency', 'single'),
             'triggers_schema': json.dumps(triggers),
             'hotkey': script_info.get('hotkey'),
             'hotkey_active': script_info.get('hotkey_active', False),
@@ -216,6 +217,7 @@ class ScriptDatabase:
             'is_node': bool(config.node and config.node.enabled),
             'schedule_enabled': bool(config.schedule and config.schedule.enabled),
             'params_form_enabled': bool(config.params_form and config.params_form.enabled),
+            'concurrency': runtime.concurrency,
 
             # 触发器配置直接 model_dump 序列化
             'triggers_schema': json.dumps(triggers.model_dump()),

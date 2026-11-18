@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
 
 from app.utils import BmTools, BM_LOG
 from .hf_downloader import HuggingFaceDownloader

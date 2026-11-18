@@ -49,6 +49,7 @@ class Script(BaseModel):
     language_version = CharField()           # 语言版本 ('>=3.8')
     entry = CharField()                      # 入口文件
     terminal = CharField(default="never")    # 终端策略
+    concurrency = CharField(default="single")  # 并发策略: single / forward
     binaries = TextField(null=True)          # 依赖的二进制 (存储为 JSON 字符串)
     dependencies = TextField(null=True)      # 依赖库
 
@@ -86,7 +87,8 @@ class Config(BaseModel):
     desktop_inform = BooleanField(default=True)  # 是否启用桌面通知
     follow_start = BooleanField(default=False)  # 是否跟随启动
     start_to_tray = BooleanField(default=False)  # 启动时隐藏到托盘
-    wechat_push_to = CharField(default='')  # 只读镜像：当前绑定收件人ID，真实来源是 weixin_state.json 的 recipient
+    wechat_push_to = CharField(default='')  # 仅推送服务：当前接收人 ID（真实来源是 weixin_state.json 的 recipient）
+    default_panel = CharField(default='search')  # 首页默认面板：search / cards
 
     class Meta:
         table_name = "app_config"
@@ -194,7 +196,16 @@ def ensure_tables():
     try:
         db.execute_sql("ALTER TABLE app_scripts ADD COLUMN models_schema TEXT")
     except Exception:
+        pass  # 已存在
+    try:
+        db.execute_sql("ALTER TABLE app_scripts ADD COLUMN concurrency TEXT NOT NULL DEFAULT 'single'")
+    except Exception:
         pass  # 列已存在
+    try:
+        db.execute_sql("ALTER TABLE app_config ADD COLUMN default_panel TEXT NOT NULL DEFAULT 'search'")
+    except Exception:
+        pass  # 已存在
+
     try:
         db.execute_sql("ALTER TABLE app_tasks ADD COLUMN task_params TEXT")
     except Exception:
@@ -282,6 +293,7 @@ def ensure_tables():
             shortcut_key_rouse=json.dumps(['ctrl']),
             desktop_inform=True,
             follow_start=False,
-            start_to_tray=False
+            start_to_tray=False,
+            default_panel='search'
         )
     _tables_initialized = True

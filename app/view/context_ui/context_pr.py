@@ -7,9 +7,11 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import ctypes
 from pathlib import Path
 
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
 
-from app.utils import BmTools, BM_LOG
+from xsideui import tr
+
+from app.utils import BmError, BmTools, BM_LOG
 from app.utils import BmNotify
 from .context_model import ContextModel
 
@@ -44,7 +46,9 @@ class MenuPresenter(QObject):
         try:
             self.model.modify_menu_status(script_id, status, self._current_target)
         except Exception as e:
-            self.notification.emit(f"修改状态失败: {str(e)}", "error")
+            text = str(e) if isinstance(e, BmError) else tr(
+                "Update status failed: %1").replace("%1", str(e))
+            self.notification.emit(text, "error")
 
     def on_move_up(self, script_id: str):
         """上移菜单项"""
@@ -66,42 +70,46 @@ class MenuPresenter(QObject):
         result = self.model.move_menu_item(script_id, direction, self._current_target)
         if result == 'ok':
             success_messages = {
-                'up': "菜单上移成功",
-                'down': "菜单下移成功",
-                'top': "菜单置顶成功",
-                'bottom': "菜单置底成功",
+                'up': tr("Moved up"),
+                'down': tr("Moved down"),
+                'top': tr("Moved to top"),
+                'bottom': tr("Moved to bottom"),
             }
-            self.notification.emit(success_messages.get(direction, "菜单移动成功"), "success")
+            self.notification.emit(success_messages.get(direction, tr("Moved")), "success")
             self.refresh_data()
             self.action_completed.emit("move", True, direction)
         elif result == 'first':
             if direction == 'top':
-                self.notification.emit("已经在分组顶部，无需置顶", "warning")
+                self.notification.emit(tr("Already at the top of the group"), "warning")
             else:
-                self.notification.emit("第一行无法上移", "warning")
+                self.notification.emit(tr("The first row cannot move up"), "warning")
         elif result == 'last':
             if direction == 'bottom':
-                self.notification.emit("已经在分组底部，无需置底", "warning")
+                self.notification.emit(tr("Already at the bottom of the group"), "warning")
             else:
-                self.notification.emit("最后一行无法下移", "warning")
+                self.notification.emit(tr("The last row cannot move down"), "warning")
         elif result == 'boundary':
-            self.notification.emit("无法跨越一/二级分组移动", "warning")
+            self.notification.emit(tr("Cannot move across level-1 and level-2 groups"), "warning")
         else:
-            self.notification.emit("未找到菜单项", "error")
+            self.notification.emit(tr("Menu item not found"), "error")
 
     def on_change_level(self, script_id: str, new_level: int):
         """改变菜单级别"""
         try:
             success = self.model.change_menu_level(script_id, new_level, self._current_target)
         except Exception as e:
-            self.notification.emit(f"菜单级别变更失败: {str(e)}", "error")
+            text = str(e) if isinstance(e, BmError) else tr(
+                "Failed to change the menu level: %1").replace("%1", str(e))
+            self.notification.emit(text, "error")
             return
         if success:
-            level_text = "一级" if new_level == 1 else "二级"
-            self.notification.emit(f"已{'升' if new_level == 1 else '降'}为{level_text}菜单", "success")
+            level_text = tr("Level 1") if new_level == 1 else tr("Level 2")
+            self.notification.emit((tr("Promoted to %1") if new_level == 1
+                                else tr("Demoted to %1")).replace("%1", level_text),
+                                  "success")
             self.refresh_data()
         else:
-            self.notification.emit("菜单级别变更失败", "error")
+            self.notification.emit(tr("Failed to change the menu level"), "error")
 
     def on_context_menu_requested(self, pos, row_data: dict):
         """请求显示上下文菜单"""
@@ -117,9 +125,9 @@ class MenuPresenter(QObject):
         """菜单操作触发"""
 
         actions = {
-            'register': ('RegisterContext.bat', "注册右键"),
-            'uninstall': ('UninstallContext.bat', "卸载右键"),
-            'Switch': ('W11MenuStyleSwitch.bat', "菜单切换"),
+            'register': ('RegisterContext.bat', tr("Register context menu")),
+            'uninstall': ('UninstallContext.bat', tr("Unregister context menu")),
+            'Switch': ('W11MenuStyleSwitch.bat', tr("Switch menu style")),
         }
 
         if action_data not in actions:
@@ -132,7 +140,7 @@ class MenuPresenter(QObject):
             cmd_path = base_path / bat_file
 
             if not cmd_path.exists():
-                raise FileNotFoundError(f"找不到批处理文件: {cmd_path}")
+                raise BmError('menu.batch.missing', path=str(cmd_path))
 
 
             # 使用 ctypes 调用 ShellExecute 以管理员权限运行
@@ -145,10 +153,10 @@ class MenuPresenter(QObject):
                 1  # 窗口显示状态
             )
 
-            BmNotify().show_success_notify("操作成功", in_window=True)
+            BmNotify().show_success_notify(tr("Operation succeeded"), in_window=True)
 
         except Exception as e:
             BM_LOG.error(f"{message}时发生错误: {str(e)}")
-            BmNotify().show_error_notify("操作失败", in_window=True)
+            BmNotify().show_error_notify(tr("Operation failed"), in_window=True)
 
 

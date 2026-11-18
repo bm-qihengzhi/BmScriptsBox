@@ -4,41 +4,83 @@ THIRD-PARTY LICENSES
 This software incorporates components from the following third-party
 open source projects:
 
-1. PySide2 (Qt for Python)
-   Version: 5.15.x
+1. PySide6 / Qt 6 (Qt for Python)
+   Version: 6.8.x (PySide6-Essentials)
    License: LGPL-3.0
    Copyright: The Qt Company
    Source: https://code.qt.io/cgit/pyside/pyside-setup.git/
 
 2. Flask
-   Version: 2.3.x
+   Version: 3.0.x
    License: BSD-3-Clause
    Copyright: 2010 Pallets
    Source: https://github.com/pallets/flask
 
 3. requests
-   Version: 2.31.x
+   Version: 2.32.x
    License: Apache-2.0
    Copyright: 2019 Kenneth Reitz
    Source: https://github.com/psf/requests
 
 4. peewee
-   Version: 3.16.x
+   Version: 3.19.x
    License: MIT License
    Copyright: 2010 Charles Leifer
    Source: https://github.com/coleifer/peewee
 
 5. certifi
-   Version: 2023.x
+   Version: 2026.x
    License: MPL-2.0
-   Copyright: 2023 Kenneth Reitz
+   Copyright: Kenneth Reitz
    Source: https://github.com/certifi/python-certifi
 
 6. uv (Python Package Manager)
-   Version: 0.1.x
+   Version: 0.12.x
    License: MIT License
    Copyright: 2023 Astral Software Inc.
    Source: https://github.com/astral-sh/uv
+
+7. pypinyin
+   Version: 0.55.0
+   License: MIT License
+   Copyright: mozillazg
+   Source: https://github.com/mozillazg/python-pinyin
+
+8. APScheduler
+   Version: 3.11.x
+   License: MIT License
+   Copyright: Alex Grönholm
+   Source: https://github.com/agronholm/apscheduler
+
+9. pynput
+    Version: 1.8.x
+    License: LGPL-3.0
+    Copyright: Moses Palmér
+    Source: https://github.com/moses-palmer/pynput
+
+10. huggingface_hub
+    Version: 2.4.x
+    License: Apache-2.0
+    Copyright: Hugging Face
+    Source: https://github.com/huggingface/huggingface_hub
+
+11. qrcode
+    Version: 8.2
+    License: BSD-3-Clause
+    Copyright: Lincoln Loop
+    Source: https://github.com/lincolnloop/python-qrcode
+
+12. pywin32
+    Version: 311
+    License: PSF-2.0
+    Copyright: Mark Hammond
+    Source: https://github.com/mhammond/pywin32
+
+13. xsideui
+    Version: 2.0.0
+    License: MIT License
+    Copyright: bmscriptsbox
+    Source: https://github.com/bmscriptsbox/xsideui
 
 OTHER COMPONENTS:
 ----------------
@@ -47,32 +89,35 @@ OTHER COMPONENTS:
 - Werkzeug (BSD-3-Clause)
 - itsdangerous (BSD-3-Clause)
 - MarkupSafe (BSD-3-Clause)
-- GitPython (BSD-3-Clause)
 - colorama (BSD-3-Clause)
 - idna (BSD-3-Clause)
 - urllib3 (MIT License)
 - keyboard (MIT License)
-- schedule (MIT License)
 - charset-normalizer (MIT License)
-- toml (MIT License)
 - six (MIT License)
 - blinker (MIT License)
-- more-itertools (MIT License)
-- backports (MIT License)
-- jaraco (MIT License)
-- importlib_metadata (Apache-2.0)
-- importlib_resources (Apache-2.0)
 - packaging (Apache-2.0/BSD)
-- gitdb (BSD License)
-- smmap (BSD License)
+- pydantic / pydantic-core (MIT License)
+- cffi (MIT License)
+- tzdata (Apache-2.0)
+- tzlocal (MIT License)
+- pyyaml (MIT License)
+- tqdm (MPL-2.0)
+- filelock (Unlicense)
+- fsspec (BSD-3-Clause)
+- truststore (MIT License)
+- Everything SDK (voidtools)
+  https://www.voidtools.com/support/everything/sdk/
 
 IMPORTANT NOTES:
 ---------------
-* PySide2 is licensed under LGPL-3.0. You have the right to obtain
+* PySide6 / Qt 6 is licensed under LGPL-3.0. You have the right to obtain
   its source code, modify it, and redistribute under LGPL terms.
+* PySide6 is distributed as separate dynamic libraries and may be replaced
+  by the user, as required by the LGPL.
 * Complete license texts are in the "licenses" directory.
 * This software is provided "as is" without warranty.
 
 ---
-For the full list with exact versions, see THIRD-PARTY-LICENSES.md.
-Generated on: January 2024
+Runtime: Python 3.12.9 (embedded) + PySide6 6.8.3
+Generated on: October 2026

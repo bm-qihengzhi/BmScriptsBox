@@ -38,6 +38,7 @@ class ScriptEntity(BaseModel):
     is_node: bool = False  # 可作为节点被联动调用
     schedule_enabled: bool = False  # 声明可被定时任务调度 ([bmscriptsbox.schedule])
     params_form_enabled: bool = False  # 声明：交互式运行时盒子生成参数表单 ([bmscriptsbox.params_form])
+    concurrency: str = "single"  # 并发策略: single / forward
 
     # --- 4. 触发器配置 (原始 JSON 存储) ---
     triggers_schema: Dict[str, Any] = Field(default_factory=dict)

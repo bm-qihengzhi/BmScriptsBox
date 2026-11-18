@@ -1,10 +1,10 @@
 [project]
 name = "bmscriptsbox"
-version = "1.4.5"
+version = "1.6.0"
 description = "BmScriptsBox - Windows跨语言脚本调度与管理软件"
 readme = "README.md"
-requires-python = ">=3.8"
-license = { text = "MIT + Commons Clause" }
+requires-python = ">=3.12"
+license = "MIT + Commons Clause"
 authors = [
     {name = "綦恒智", email = "bmscriptsbox@163.com"}
 ]
@@ -12,31 +12,31 @@ keywords = ["script-manager", "automation", "hotkey", "workflow"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Win32 (MS Windows)",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: Microsoft :: Windows",
     "Topic :: Desktop Environment :: Window Managers",
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "PySide2==5.15.2.1",
-    "xsideui==0.9.6",
+    "PySide6-Essentials>=6.8,<6.9",
+    "xsideui>=2.1.1",
     "flask==3.0.3",
     "requests==2.32.4",
-    "peewee==4.0.6",
+    "peewee>=3.18,<4",
+    "pypinyin==0.55.0",
+    # pypinyin 依赖 JSON 数据文件，运行时请作为目录放入 runtime/Lib/site-packages，
+    # 不要打进 _pure_packages.zip（zipimport 无法 open 压缩包内的 json）。
     "pydantic==2.10.6",
-    "pygit2",
-    "schedule==1.2.2",
-    "pynput==1.8.2",
-    "toml==0.10.2",
-    "packaging==26.2",
-    "pywin32==311",
+    "apscheduler>=3.10,<4",
+    "pynput>=1.7,<2",
+    "packaging>=24",
+    "pywin32>=311",
     "keyboard==0.13.5",
     "huggingface_hub>=0.20.0",
+    "qrcode>=7.4",
     "tqdm",
     "pyyaml",
     "filelock"
@@ -46,3 +46,5 @@ dependencies = [
 Homepage = "https://www.bm-box.cn"
 Repository = "https://github.com/bm-qihengzhi/BmScriptsBox"
 Issues = "https://github.com/bm-qihengzhi/BmScriptsBox/issues"
+
+

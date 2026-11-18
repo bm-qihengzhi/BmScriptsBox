@@ -4,7 +4,9 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
-from PySide2.QtCore import QObject, Signal, QElapsedTimer, Slot
+import time
+
+from PySide6.QtCore import QObject, Signal
 from app.utils import BM_LOG
 
 class RouseMonitor(QObject):
@@ -27,28 +29,44 @@ class RouseMonitor(QObject):
             self.threshold = threshold  # 双击判定阈值（毫秒）
             self.target_keys = ['f12']  # 默认值
 
-            # 使用 QElapsedTimer 记录时间差，无需事件循环
-            self.timer = QElapsedTimer()
             self.press_count = 0
+            self._last_press = 0.0
+            self._hook_id = None
             self._kb = None
 
+    KEY_ALIASES = {
+        'left ctrl': 'ctrl', 'right ctrl': 'ctrl',
+        'ctrl left': 'ctrl', 'ctrl right': 'ctrl',
+        'ctrl_l': 'ctrl', 'ctrl_r': 'ctrl',
+        'left shift': 'shift', 'right shift': 'shift',
+        'shift_l': 'shift', 'shift_r': 'shift',
+        'left alt': 'alt', 'right alt': 'alt',
+        'alt_l': 'alt', 'alt_r': 'alt',
+    }
+
     def start(self):
-        """启动监听"""
+        """启动监听（幂等）"""
+        if self._hook_id is not None:
+            return
         import keyboard as kb
         self._kb = kb
         try:
             from app.data import ConfigDatabase
             config = ConfigDatabase().get_all()
-            self.target_keys = [k.lower() for k in config.get('shortcut_key_rouse', ['f12'])]
+            self.target_keys = [str(k).lower() for k in config.get('shortcut_key_rouse', ['f12'])]
         except (AttributeError, Exception) as e:
             BM_LOG.warning(f"读取双击唤醒配置失败，使用默认值: {e}")
-        self._kb.hook(self._on_key_event)
+        self._hook_id = self._kb.hook(self._on_key_event)
+        BM_LOG.error(f"[双击唤醒] 监听已启动, targets={self.target_keys}")
 
     def _on_key_event(self, event):
         """底层按键回调"""
-        if event.name and event.name.lower() in self.target_keys:
-            if event.event_type == self._kb.KEY_UP:
-                self._process_click()
+        if not event.name or event.event_type != self._kb.KEY_UP:
+            return
+        name = event.name.lower()
+        name = self.KEY_ALIASES.get(name, name)
+        if name in self.target_keys:
+            self._process_click(name)
 
     def update_configs(self, new_keys=None, new_threshold=None):
         """
@@ -65,30 +83,36 @@ class RouseMonitor(QObject):
 
         # 状态重置，防止修改过程中产生误触发
         self.press_count = 0
-        self.timer.invalidate()
+        self._last_press = 0.0
 
-    def _process_click(self):
+    def _process_click(self, name=""):
         """核心双击判定逻辑"""
-        # 如果是第一次按，或者距离上次按键超过了阈值，重置计数
-        if not self.timer.isValid() or self.timer.elapsed() > self.threshold:
+        now = time.monotonic()
+        last = self._last_press
+        interval = (now - last) * 1000.0 if last else None
+        if interval is not None and interval < 40:
+            return  # 同一物理按键的重复上报，忽略
+        if interval is None or interval > self.threshold:
             self.press_count = 1
-            self.timer.start()
         else:
-            # 在阈值时间内再次按下
             self.press_count += 1
+        self._last_press = now
 
         if self.press_count >= 2:
             self.double_key_triggered.emit()
-            self.press_count = 0  # 触发后重置
-            self.timer.invalidate()  # 使计时器失效
+            BM_LOG.error(f"[双击唤醒] 触发 key={name}")
+            self.press_count = 0
+            self._last_press = 0.0
 
     def stop(self):
-        if self._kb:
-            self._kb.unhook(self._on_key_event)
+        if self._kb and self._hook_id is not None:
+            self._kb.unhook(self._hook_id)
+            self._hook_id = None
 
     def update_keys(self, new_keys):
-        self.target_keys = [k.lower() for k in new_keys]
+        self.target_keys = [str(k).lower() for k in new_keys]
         self.press_count = 0
+        self._last_press = 0.0
 
 _double_monitor_instance = None
 def get_double_monitor():

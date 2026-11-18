@@ -4,7 +4,7 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
-from PySide2.QtCore import QThread
+from PySide6.QtCore import QThread
 
 from app.utils import BM_LOG
 from app.servers.scheduled_core import DatabaseTaskScheduler

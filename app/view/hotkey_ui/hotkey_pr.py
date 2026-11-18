@@ -6,7 +6,9 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from typing import List
 
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
+
+from xsideui import tr
 
 from .hotkey_model import HotkeyModel
 from ...data import ScriptEntity
@@ -38,7 +40,7 @@ class HotkeyPresenter(QObject):
             self._last_keyword = (keyword or "").strip()
             self._apply_filter(self._last_keyword, notify=True)
         except Exception as e:
-            self.notification.emit(f"搜索失败: {str(e)}", False)
+            self.notification.emit(tr("Search failed: %1").replace("%1", str(e)), False)
 
     def _apply_filter(self, keyword: str, notify: bool = True):
         """过滤后保存当前可见列表，供右键菜单按行取脚本"""
@@ -46,7 +48,7 @@ class HotkeyPresenter(QObject):
         self._visible_scripts = filtered
         if not filtered and keyword:
             if notify:
-                self.notification.emit("未搜索到任何脚本", False)
+                self.notification.emit(tr("No scripts found"), False)
             self.scripts_loaded.emit([])
             return
         self.scripts_loaded.emit(filtered)
@@ -61,23 +63,23 @@ class HotkeyPresenter(QObject):
         """删除快捷键"""
         try:
             self.model.remove_hotkey(script_id)
-            self.notification.emit("快捷键已清空", True)
+            self.notification.emit(tr("Shortcuts cleared"), True)
             self.load_scripts()
         except Exception as e:
-            self.notification.emit(f"删除快捷键失败: {str(e)}", False)
+            self.notification.emit(tr("Failed to remove the shortcut: %1").replace("%1", str(e)), False)
 
     def toggle_status(self, script_id: str, status: bool):
         """切换状态"""
         try:
             self.model.toggle_status(script_id, status)
         except Exception as e:
-            self.notification.emit(f"切换状态失败: {str(e)}", False)
+            self.notification.emit(tr("Failed to toggle the shortcut: %1").replace("%1", str(e)), False)
 
     def save_hotkey(self, script_id: str, hotkey_key: str):
         """保存快捷键（冲突自动覆盖）"""
         try:
             self.model.save_hotkey(script_id, hotkey_key, overwrite=True)
-            self.notification.emit("快捷键设置成功", True)
+            self.notification.emit(tr("Shortcut saved"), True)
             self.load_scripts()
         except Exception as e:
             self.notification.emit(str(e), False)

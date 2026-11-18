@@ -7,7 +7,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import time
 from pathlib import Path
 import pythoncom
-from PySide2.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal
 from app.data import ProjectGlobal
 from app.data import ScriptDatabase
 from app.data.database import TaskDatabase
@@ -52,7 +52,8 @@ class InstallCloudScriptWork(QThread):
 
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
-    consent_signal = Signal(dict)
+    # object 而非 dict：跨线程投递 dict 会被深拷贝，确认结果（payload['_result']）回写不到安装线程
+    consent_signal = Signal(object)
 
     def __init__(self, script_id:str, script_git_url:str, branch:str='main'):
         super().__init__()
@@ -80,7 +81,8 @@ class InstallLocalScriptWork(QThread):
 
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
-    consent_signal = Signal(dict)
+    # object 而非 dict：跨线程投递 dict 会被深拷贝，确认结果（payload['_result']）回写不到安装线程
+    consent_signal = Signal(object)
 
     def __init__(self, script_path):
         super().__init__()
@@ -107,7 +109,8 @@ class InstallGitScriptWork(QThread):
 
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
-    consent_signal = Signal(dict)
+    # object 而非 dict：跨线程投递 dict 会被深拷贝，确认结果（payload['_result']）回写不到安装线程
+    consent_signal = Signal(object)
 
     def __init__(self, git_url, branch):
         super().__init__()

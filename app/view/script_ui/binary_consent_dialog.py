@@ -12,8 +12,8 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from urllib.parse import urlparse
 
-from PySide2.QtCore import Qt
-from PySide2.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget
 
 from xsideui import (XPushButton, XButtonVariant, XColor, tr, XDialog, XLabel)
 

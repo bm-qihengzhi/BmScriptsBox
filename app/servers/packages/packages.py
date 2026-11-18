@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
 
 from app.servers.packages.download import XDownLoad
 from app.servers.packages.integrity import BinaryIntegrityStore, sha256_file
@@ -20,7 +20,7 @@ from app.servers.packages.match_version import VersionMatcher
 from app.servers.packages.remote import RemoteManifestProvider
 from app.servers.packages.silent import SilentInstaller
 from app.servers.packages.unzip import ArchiveExtractor
-from app.utils import BmTools, BM_LOG
+from app.utils import BmError, BmTools, BM_LOG
 
 
 class PackagesManager(QObject):
@@ -73,7 +73,8 @@ class PackagesManager(QObject):
 
             cloud_res = matcher.fetch_best_cloud_version(remote_data, package_name, version_requirement)
             if not cloud_res.found:
-                raise RuntimeError(f"未找到匹配的版本要求: {package_name} {version_requirement}")
+                raise BmError('env.package.no_matching_version',
+                              package=package_name, requirement=version_requirement)
 
             payload = cloud_res.payload
             self._emit_status("已获取最优下载连接")
@@ -116,7 +117,7 @@ class PackagesManager(QObject):
 
         except Exception as e:
             BM_LOG.error(f"安装 {package_name} 失败: {e}")
-            raise RuntimeError(f"软件包 [{package_name}] 部署异常: {e}")
+            raise BmError('env.package.deploy_failed', package=package_name) from e
 
     def batch_install_cli(self, packages: List, script_id: str = '') -> List[str]:
         """
@@ -181,15 +182,13 @@ class PackagesManager(QObject):
                 if not XDownLoad.verify_sha256(downloaded, declared_sha):
                     actual = sha256_file(downloaded)
                     self._safe_unlink(downloaded)
-                    raise RuntimeError(
-                        f"二进制 {name} sha256 校验失败（声明={declared_sha}，实际={actual}）")
+                    raise BmError('install.binary.checksum_failed', name=name)
             else:
                 actual = sha256_file(downloaded)
                 strict = self._is_version_tag(tag)
                 if not store.check_and_record_hash(name, tag, actual, strict=strict):
                     self._safe_unlink(downloaded)
-                    raise RuntimeError(
-                        f"二进制 {name} 完整性校验失败：tag={tag} 内容与首次记录不一致（疑似篡改）")
+                    raise BmError('install.binary.tampered', name=name)
 
             # 5. 解压 / 静默安装 / 单文件
             bin_paths = self._materialize_binary(downloaded, name, tag, bin_names,
@@ -198,7 +197,7 @@ class PackagesManager(QObject):
             # 6. 存在性校验
             missing = [str(p) for p in bin_paths if not Path(p).exists()]
             if missing:
-                raise RuntimeError(f"二进制 {name} 未找到声明的可执行文件: {missing}")
+                raise BmError('install.binary.exe_missing', name=name, missing=str(missing))
 
             # 7. shim + 清单
             if env_set:
@@ -212,14 +211,14 @@ class PackagesManager(QObject):
             BM_LOG.error(f"安装直连二进制 {name} 失败: {e}")
             if isinstance(e, RuntimeError):
                 raise
-            raise RuntimeError(f"外部二进制 [{name}] 部署异常: {e}")
+            raise BmError('env.package.deploy_failed', package=name) from e
 
     def _materialize_binary(self, downloaded: Path, name: str, tag: str, bin_names: List[str],
                             do_extract: bool, is_installer: bool, install_opts) -> List[Path]:
         """把下载产物变成可暴露的可执行文件列表（解压 / 静默安装 / 直接使用）"""
         if is_installer and not do_extract:
             if not bin_names:
-                raise RuntimeError(f"二进制 {name} 为安装程序，必须声明 bin（可执行文件名）")
+                raise BmError('install.binary.bin_required', name=name)
             self._emit_status(f"检测到安装程序，正在执行静默部署: {name}")
             install_dir = self.base_path / 'cli' / name / tag
             installer = SilentInstaller()
@@ -229,7 +228,7 @@ class PackagesManager(QObject):
                 binary_name=bin_names,
                 silent_params=install_opts)
             if not ok:
-                raise RuntimeError(f"二进制 {name} 静默安装失败")
+                raise BmError('install.binary.silent_failed', name=name)
             self._safe_unlink(downloaded)
             return [Path(install_dir) / bn for bn in bin_names]
 
@@ -286,8 +285,7 @@ class PackagesManager(QObject):
         if store.is_trusted(script_id, url):
             return
         if not self._consent_callback:
-            raise RuntimeError(
-                f"外部二进制 {name} 需要用户确认，但当前无确认界面，已终止安装")
+            raise BmError('install.binary.confirm_unavailable', name=name)
         payload = {
             'name': name,
             'url': url,
@@ -297,7 +295,7 @@ class PackagesManager(QObject):
             'script_id': script_id,
         }
         if not self._consent_callback(payload):
-            raise RuntimeError(f"用户拒绝下载外部二进制 {name}，安装已终止")
+            raise BmError('install.binary.declined', name=name)
 
 
     # --- 环境特定接口 (UV / Python / Node) ---
@@ -480,7 +478,7 @@ class PackagesManager(QObject):
             binary_name=payload.get('bin')
         )
         if not success:
-            raise RuntimeError(f"静默安装失败: {name}")
+            raise BmError('install.binary.silent_failed', name=name)
         return [Path(install_dir) / bn for bn in payload.get('bin')]
 
     def _create_shim_exes(self, source_paths: List[Path], package_name: str):

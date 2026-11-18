@@ -4,7 +4,7 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
-from PySide2.QtCore import QTimer
+from PySide6.QtCore import QTimer
 
 from app.data import ProjectGlobal
 from app.data.database import TaskDatabase

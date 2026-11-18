@@ -5,11 +5,11 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from pynput import mouse
-from PySide2.QtCore import Qt
-from PySide2.QtGui import QIcon, QCursor
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QApplication, QListWidgetItem
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon, QCursor
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication, QListWidgetItem
 
-from xsideui import XListWidget, XDialog, tr
+from xsideui import XListWidget, XDialog, tr, XI18N
 
 from app.data import ProjectGlobal
 from app.utils import BmNotify, BmTools
@@ -32,7 +32,7 @@ class FastTextMenu(XDialog):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.set_title('超级复制菜单')
+        self.set_title(XI18N.x_tr('Super Copy Menu'))
         self.set_logo(BmTools.get_logo_path())
         self.hide_title_bar()
         self.setMaximumWidth(160)
@@ -77,10 +77,10 @@ class FastTextMenu(XDialog):
                 invoke_mode='manual', allow_params_form=True,
                 reserve_first=True, parent=self, source='quick_copy')
         except ScriptBusyError:
-            BmNotify().show_warning_notify(tr('脚本正在运行中，请等待完成'))
+            BmNotify().show_warning_notify(tr('The script is running, please wait'))
             return
         except ScriptNotFoundError:
-            BmNotify().show_error_notify(content=tr('脚本不存在或已被卸载'))
+            BmNotify().show_error_notify(content=tr('Script not found or uninstalled'))
             self.hide_window()
             return
 
@@ -99,9 +99,9 @@ class FastTextMenu(XDialog):
 
     def _execute_notify(self, state):
         if state:
-            BmNotify().show_info_notify(content=tr('Executing Script'))
+            BmNotify().show_info_notify(content=tr('Running Script'))
         else:
-            BmNotify().show_error_notify(content=tr('Executing Failed'))
+            BmNotify().show_error_notify(content=tr('Execution Failed'))
 
     def set_clipboard_text(self, text):
         self._clipboard_text = text
@@ -118,33 +118,31 @@ class FastTextMenu(XDialog):
         self.raise_()
 
     def _position_near_cursor(self):
-        """把窗口定位到鼠标右下沿（支持多显示器、越界回退）"""
+        """把可见内容区定位到鼠标右下沿（支持多显示器、越界回退）"""
         cursor_pos = QCursor.pos()
-        window_width = self.width()
-        window_height = self.height()
+        margin = self.SHADOW_MARGIN
+        visible = self.content_size()
+        window_width = visible.width()
+        window_height = visible.height()
 
         # 鼠标所在的屏幕（支持多显示器）
         mouse_screen = QApplication.screenAt(cursor_pos) or QApplication.primaryScreen()
         screen_geometry = mouse_screen.availableGeometry()
 
-        # 鼠标下沿右侧
+        # 可见区域左上角
         x = cursor_pos.x() + 10
         y = cursor_pos.y() + 10
 
-        # 右边界
         if x + window_width > screen_geometry.right():
             x = screen_geometry.right() - window_width - 10
-        # 左边界
         if x < screen_geometry.left():
             x = screen_geometry.left() + 10
-        # 下边界：下方空间不够则显示在鼠标上方
         if y + window_height > screen_geometry.bottom():
             y = cursor_pos.y() - window_height - 10
-        # 上边界
         if y < screen_geometry.top():
             y = screen_geometry.top() + 10
 
-        self.move(x, y)
+        self.move(x - margin, y - margin)
 
     def showEvent(self, event):
         """窗口显示时启动鼠标监听"""

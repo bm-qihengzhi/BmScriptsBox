@@ -6,6 +6,8 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import win32gui
 from pathlib import Path
+
+from app.utils import BmError, BM_LOG
 from .desktop_utils import DesktopMouseChecker
 
 
@@ -24,7 +26,7 @@ class FileExplorerManager:
         active_path = self._match_path_and_title(paths, title)
 
         if not active_path:
-            raise ValueError("无法识别当前窗口路径")
+            raise BmError('explorer.window.unknown')
         return [active_path]
 
     def _get_explorer_paths(self):
@@ -64,9 +66,11 @@ class FileExplorerManager:
             ValueError: 当路径列表为空、标题为空或未找到匹配路径时抛出
         """
         if not paths:
-            raise ValueError("路径列表为空")
+            BM_LOG.warning("资源管理器路径列表为空，无法定位当前窗口")
+            raise BmError('explorer.window.unknown')
         if not title:
-            raise ValueError("标题为空")
+            BM_LOG.warning("资源管理器活动窗口标题为空，无法定位路径")
+            raise BmError('explorer.window.unknown')
 
         # 定义英文文件夹名到中文的映射
         folder_name_mapping = {
@@ -102,4 +106,6 @@ class FileExplorerManager:
                 if chinese_name == folder_name and english_name in title:
                     return path
 
-        raise ValueError("未找到匹配的路径")
+        BM_LOG.warning("资源管理器路径与窗口标题均未匹配: paths=%s title=%r"
+                        % (paths, title))
+        raise BmError('explorer.window.unknown')

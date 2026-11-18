@@ -6,9 +6,10 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import random
 import time
+
+from app.utils import BmError
 from typing import Dict, Any
 
-import requests
 from app.data import ProjectGlobal
 from app.utils.proxy import get_sorted_proxies
 from app.utils.region import is_china
@@ -29,6 +30,7 @@ class RemoteManifestProvider:
     ]
 
     def __init__(self, cache_ttl: int = 600):
+        import requests
         self._cache: Dict[str, Dict[str, Any]] = {}
         self.cache_ttl = cache_ttl
         self._session = requests.Session()
@@ -67,7 +69,7 @@ class RemoteManifestProvider:
         获取包配置数据（带过期检查）
         """
         if not file_name:
-            raise ValueError("文件名不能为空")
+            raise BmError('remote.filename.empty')
 
         cache_key = file_name.lower()
         now = time.time()
@@ -124,7 +126,7 @@ class RemoteManifestProvider:
 
         if cache_key in self._cache:
             return self._cache[cache_key]['content']
-        raise RuntimeError(f"无法获取远程清单: {last_exception}")
+        raise BmError('remote.manifest.failed', detail=str(last_exception)) from last_exception
 
     def get_banner_manifest(self) -> Dict:
         """
@@ -151,7 +153,7 @@ class RemoteManifestProvider:
         except Exception as e:
             if cache_key in self._cache:
                 return self._cache[cache_key]['content']
-            raise RuntimeError(f"无法获取远程清单: {e}")
+            raise BmError('remote.manifest.failed', detail=str(e)) from e
 
 
 

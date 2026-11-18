@@ -9,9 +9,23 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, model_validator, ValidationInfo, field_validator
-from typing import List, Dict, Any, Optional
+from pydantic import (BaseModel, ConfigDict, Field, model_validator,
+                      ValidationInfo, field_validator)
+
+from app.utils import BmError
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
+
+from .input_match_spec import (
+    MAX_REGEX_PATTERN,
+    PATH_MATCH_FIELDS,
+    PREDICATE_FIELDS,
+    PREDICATE_OPS,
+    SIMPLE_MATCH_FIELDS,
+    TEXT_FORMATS,
+    TEXT_MATCH_FIELDS,
+    URL_MATCH_FIELDS,
+)
 
 
 # --- 二进制来源白名单：直连模式仅允许 GitHub ---
@@ -77,9 +91,7 @@ class ScriptInfo(BaseModel):
     @classmethod
     def check_not_absolute(cls, v: str) -> str:
         if os.path.isabs(v) or v.startswith('\\\\'):
-            raise ValueError(
-                "icon 必须是相对于脚本根目录的【相对路径】，不能使用绝对路径"
-            )
+            raise BmError('config.path.relative', field='icon')
         return v
 
     @model_validator(mode='after')
@@ -101,7 +113,8 @@ class ScriptModel(BaseModel):
     def check_source(cls, v: str) -> str:
         allowed = {"modelscope", "huggingface"}
         if v.lower() not in allowed:
-            raise ValueError(f"source 必须是 {allowed} 之一，当前值: '{v}'")
+            raise BmError('config.enum.invalid', field='source',
+                           allowed=allowed, value=v)
         return v.lower()
 
 
@@ -129,8 +142,7 @@ class ScriptBinary(BaseModel):
             return None
         v = str(v).strip()
         if not _is_allowed_binary_url(v):
-            raise ValueError(
-                "binaries.url 仅允许 GitHub 直链（https://github.com/... 或 *.githubusercontent.com）")
+            raise BmError('config.binary.github_url')
         return v
 
     @field_validator('sha256')
@@ -140,7 +152,7 @@ class ScriptBinary(BaseModel):
             return None
         v = str(v).strip().lower()
         if not re.fullmatch(r'[0-9a-f]{64}', v):
-            raise ValueError("binaries.sha256 必须是 64 位十六进制字符串")
+            raise BmError('config.binary.sha256')
         return v
 
     @model_validator(mode='after')
@@ -148,8 +160,7 @@ class ScriptBinary(BaseModel):
         # 直连模式（写了 url）：禁止使用保留命令名，防止劫持核心工具
         if self.url:
             if _reserve_name_of(self.name) in RESERVED_COMMAND_NAMES:
-                raise ValueError(
-                    f"直连模式下 binaries.name '{self.name}' 为保留命令名，禁止使用")
+                raise BmError('config.binary.reserved_name', name=self.name)
         return self
 
 
@@ -159,7 +170,15 @@ class ScriptRuntime(BaseModel):
     language_version: str
     entry: str = Field(min_length=1)
     terminal: str = "always"
+    concurrency: Literal["single", "forward"] = "single"
     binaries: List[ScriptBinary] = Field(default_factory=list)
+
+    @field_validator("concurrency", mode="before")
+    @classmethod
+    def normalize_concurrency(cls, v):
+        if v is None or not str(v).strip():
+            return "single"
+        return str(v).strip().lower()
 
     @field_validator('binaries', mode='before')
     @classmethod
@@ -179,9 +198,7 @@ class ScriptRuntime(BaseModel):
     @classmethod
     def check_not_absolute(cls, v: str) -> str:
         if os.path.isabs(v) or v.startswith('\\\\'):
-            raise ValueError(
-                "entry 必须是相对于脚本根目录的【相对路径】，不能使用绝对路径"
-            )
+            raise BmError('config.path.relative', field='entry')
         return v
 
     @model_validator(mode='after')
@@ -202,15 +219,13 @@ class ScriptRuntime(BaseModel):
 
         # 2. 如果是其他语言，必须填写版本号
         if not ver:
-            raise ValueError(f"当编程语言为 '{self.language}' 时，必须填写 language_version")
+            raise BmError('config.version.required', language=self.language)
 
         # 3. 校验版本号格式 (要求以比较运算符开头，如 >=3.8, ==3.10)
         # 正则解析：开头必须是 > 或 < 或 = 或 >= 或 <= 或 ==，后面跟着数字和点
         pattern = r'^(>=|<=|==|>|<)(?i:v)?\d+(\.\d+)*$'
         if not re.match(pattern, ver):
-            raise ValueError(
-                f"language_version 格式错误: '{ver}'。正确示例: '>=3.8'、'==3.10.1' 或 '>=v16.0'"
-            )
+            raise BmError('config.version.invalid', version=ver)
 
 
         return self
@@ -234,27 +249,206 @@ class QuickCopyConfig(BaseModel):
     enabled: bool = False
 
 
+# --- 5. IO 与 工作流 ---
+def _normalize_string_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = value.strip()
+        return [value] if value else []
+    if isinstance(value, (list, tuple, set)):
+        return [
+            str(item).strip()
+            for item in value
+            if str(item).strip()
+        ]
+    return value
+
+
+class InputPredicate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    op: str
+    value: Any = None
+
+    @field_validator('field')
+    @classmethod
+    def check_field(cls, v: str) -> str:
+        value = str(v or "").strip()
+        if value not in PREDICATE_FIELDS:
+            raise BmError('config.enum.invalid', field='inputs.match.field',
+                           allowed=sorted(PREDICATE_FIELDS), value=value)
+        return value
+
+    @field_validator('op')
+    @classmethod
+    def check_op(cls, v: str) -> str:
+        value = str(v or "").strip()
+        if value not in PREDICATE_OPS:
+            raise BmError('config.enum.invalid', field='inputs.match.op',
+                           allowed=sorted(PREDICATE_OPS), value=value)
+        return value
+
+    @model_validator(mode='after')
+    def validate_value(self):
+        if self.op in ('in', 'not_in'):
+            if not isinstance(self.value, (list, tuple, set)):
+                raise BmError('config.match.value_array', op=self.op)
+        elif self.op in ('gte', 'lte'):
+            if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
+                raise BmError('config.match.value_number', op=self.op)
+        elif self.op == 'regex':
+            if not isinstance(self.value, str) or not self.value:
+                raise BmError('config.match.regex_empty')
+            if len(self.value) > MAX_REGEX_PATTERN:
+                raise BmError('config.match.regex_length', limit=MAX_REGEX_PATTERN)
+            try:
+                re.compile(self.value)
+            except re.error as exc:
+                raise BmError('config.match.regex_invalid', reason=str(exc)) from exc
+        return self
+
+
+class InputMatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["url", "path", "text", "magnet"]
+    weight: int = 0
+    ignore_case: bool = False
+
+    scheme: List[str] = Field(default_factory=list)
+    domain: List[str] = Field(default_factory=list)
+    host: List[str] = Field(default_factory=list)
+    path: str = ""
+    query_contains: str = ""
+    ext: List[str] = Field(default_factory=list)
+    exists: Optional[bool] = None
+    is_file: Optional[bool] = None
+    is_folder: Optional[bool] = None
+    name: str = ""
+
+    format: List[str] = Field(default_factory=list)
+    prefix: str = ""
+    suffix: str = ""
+    contains: str = ""
+    equals: str = ""
+    min_length: Optional[int] = None
+    max_length: Optional[int] = None
+    regex: str = ""
+
+    all: List[InputPredicate] = Field(default_factory=list)
+    none: List[InputPredicate] = Field(default_factory=list)
+
+    @field_validator('scheme', 'domain', 'host', 'ext', 'format', mode='before')
+    @classmethod
+    def normalize_list(cls, v):
+        return _normalize_string_list(v)
+
+    @model_validator(mode='after')
+    def validate_rule(self):
+        for field in ('scheme', 'domain', 'host', 'format'):
+            values = getattr(self, field)
+            setattr(self, field, [
+                value.lower() for value in values if value
+            ])
+        self.ext = [
+            value.lower() if value.startswith('.') else ('.' + value.lower())
+            for value in self.ext if value
+        ]
+
+        if self.min_length is not None and self.max_length is not None:
+            if self.min_length > self.max_length:
+                raise BmError('config.match.length_range')
+
+        simple = self._active_simple_fields()
+        advanced = bool(self.all or self.none)
+        if advanced and simple:
+            raise BmError('config.match.mixed')
+
+        allowed = set()
+        if self.kind == 'url':
+            allowed |= URL_MATCH_FIELDS
+        elif self.kind == 'path':
+            allowed |= PATH_MATCH_FIELDS
+        elif self.kind == 'text':
+            allowed |= TEXT_MATCH_FIELDS
+        invalid = simple - allowed
+        if invalid:
+            raise BmError('config.match.unsupported_field',
+                           kind=self.kind, fields=sorted(invalid))
+
+        for name in self.format:
+            if name not in TEXT_FORMATS:
+                raise BmError('config.enum.invalid', field='inputs.match.format',
+                               allowed=sorted(TEXT_FORMATS), value=name)
+
+        if self.regex:
+            if len(self.regex) > MAX_REGEX_PATTERN:
+                raise BmError('config.match.regex_length', limit=MAX_REGEX_PATTERN)
+            try:
+                re.compile(self.regex)
+            except re.error as exc:
+                raise BmError('config.match.regex_invalid', reason=str(exc)) from exc
+        return self
+
+    def _active_simple_fields(self):
+        active = set()
+        for name in SIMPLE_MATCH_FIELDS:
+            if name in ('kind', 'weight', 'ignore_case', 'all', 'none'):
+                continue
+            value = getattr(self, name)
+            if name in ('min_length', 'max_length'):
+                if value is not None:
+                    active.add(name)
+            elif isinstance(value, bool):
+                if value is not None:
+                    active.add(name)
+            elif isinstance(value, (int, float)):
+                if value != 0:
+                    active.add(name)
+            elif value:
+                active.add(name)
+        return active
+
+
+class SearchTrigger(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    match: List[InputMatch] = Field(default_factory=list)
+
+
 class TriggersConfig(BaseModel):
     context_menu: ContextMenuConfig = Field(default_factory=ContextMenuConfig)
     shortcut: ShortcutConfig = Field(default_factory=ShortcutConfig)
     quick_copy: QuickCopyConfig = Field(default_factory=QuickCopyConfig)
+    search: Optional[SearchTrigger] = None
 
 
-# --- 5. IO 与 工作流 ---
 class IOParam(BaseModel):
     name: str = ""
     label: str = ""             # 输入显示名（表单标签；空则回退 name）
-    type: str = ""            # 留空=占位（filter_empty_io 过滤）；否则 list（路径数组）| str（单条文本）
+    type: str = ""            # 留空=占位（filter_empty_io 过滤）；否则 list（路径数组）| str（文本）
     exts: List[str] = Field(default_factory=list)
     description: str = ""
     pick: Optional[str] = None   # 本地文件选择器：files | folders | both；不写 = 纯文本多行
+    # 注：data[name] 始终为数组；type 仅用于 UI/选择器提示
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_legacy_match(cls, data):
+        if isinstance(data, dict) and "match" in data:
+            raise BmError('config.match.removed')
+        return data
 
     @field_validator('type')
     @classmethod
     def check_type(cls, v: str) -> str:
         allowed = {"str", "list"}
         if v and v not in allowed:
-            raise ValueError(f"IO 参数 type 必须是 {allowed} 之一（或留空），当前值: '{v}'")
+            raise BmError('config.enum.invalid', field='inputs.type',
+                           allowed=allowed, value=v)
         return v
 
     @field_validator('pick')
@@ -262,7 +456,8 @@ class IOParam(BaseModel):
     def check_pick(cls, v: Optional[str]) -> Optional[str]:
         allowed = {"files", "folders", "both"}
         if v and v not in allowed:
-            raise ValueError(f"inputs 的 pick 必须为 {allowed} 之一（或不写），当前值: '{v}'")
+            raise BmError('config.enum.invalid', field='inputs.pick',
+                           allowed=allowed, value=v)
         return v
 
 
@@ -284,7 +479,8 @@ class ScriptParam(BaseModel):
     def check_type(cls, v: str) -> str:
         allowed = {"str", "int", "float", "bool", "list", "dict"}
         if v not in allowed:
-            raise ValueError(f"params.type 必须是 {allowed} 之一，当前值: '{v}'")
+            raise BmError('config.enum.invalid', field='params.type',
+                           allowed=allowed, value=v)
         return v
 
     @field_validator('choice_labels')
@@ -295,7 +491,7 @@ class ScriptParam(BaseModel):
         choices = info.data.get('choices') or []
         extra = [k for k in v if k not in choices]
         if extra:
-            raise ValueError(f"params.choice_labels 的键必须在 choices 内，多余的: {extra}")
+            raise BmError('config.param.choice_labels', keys=extra)
         return v
 
     @field_validator('when')
@@ -304,9 +500,9 @@ class ScriptParam(BaseModel):
         if v is None:
             return v
         if not isinstance(v, dict):
-            raise ValueError("params.when 必须是 dict")
+            raise BmError('config.param.when_type')
         if not isinstance(v.get('field'), str) or not v.get('field'):
-            raise ValueError("params.when 必须含 field（被依赖的参数名）")
+            raise BmError('config.param.when_field')
         # eq / in 可省略 → 揭示型：仅随被依赖字段的显隐而显隐
         return v
 
@@ -354,32 +550,49 @@ class ScriptTomlConfig(BaseModel):
         return self
 
     @model_validator(mode='after')
+    def validate_search(self):
+        search = self.triggers.search if self.triggers else None
+        if not search or not search.enabled:
+            return self
+        if not self.inputs:
+            raise BmError('config.search.target')
+        return self
+
+    @model_validator(mode='after')
     def validate_params(self):
         # inputs 严格 ≤1；副文件输入用 params 的 str 类型声明路径参数
         if len(self.inputs) > 1:
-            raise ValueError("inputs 最多只能声明 1 个（主数据），副文件输入请改用 params 的 str 类型声明路径参数")
+            raise BmError('config.inputs.too_many')
 
         names = [p.name for p in self.params]
         if len(names) != len(set(names)):
-            raise ValueError("params 中存在重复的 name")
+            raise BmError('config.duplicate_param')
+
+        # when.field 必须指向已声明的 params：指向不存在的字段会让该字段永远无法显现
+        for p in self.params:
+            ref = (p.when or {}).get('field')
+            if ref and ref not in names:
+                raise BmError('config.param.when_unknown',
+                               name=p.name, ref=ref)
 
         for p in self.params:
             if p.type != 'str' and p.choices:
-                raise ValueError(f"params '{p.name}' 的 choices 仅对 str 类型有效，当前类型为 '{p.type}'")
+                raise BmError('config.param.choices_type',
+                               name=p.name, type=p.type)
         return self
 
     @model_validator(mode='after')
     def validate_dependencies(self):
         ids = [d.id for d in self.dependencies]
         if len(ids) != len(set(ids)):
-            raise ValueError("dependencies 中存在重复的 id")
+            raise BmError('config.duplicate_dependency')
         if str(self.info.id) in ids:
-            raise ValueError("脚本不能依赖自己")
+            raise BmError('config.dependency.self')
         return self
 
     @model_validator(mode='after')
     def validate_node(self):
         # 声明可作为节点的脚本必须有返回能力（至少 1 个 outputs）
         if self.node and self.node.enabled and not self.outputs:
-            raise ValueError("声明可作为节点的脚本必须至少声明 1 个 outputs")
+            raise BmError('config.outputs.required')
         return self

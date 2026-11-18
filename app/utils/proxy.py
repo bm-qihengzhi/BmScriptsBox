@@ -8,8 +8,6 @@ import concurrent.futures
 import time
 from typing import Dict, List
 
-import requests
-
 from app.data import ProjectGlobal
 
 CACHE_TTL = 120  # 2 分钟
@@ -80,6 +78,8 @@ def _probe_urls(urls: List[str]) -> List[str]:
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept-Encoding': 'identity',
     }
+
+    import requests
 
     def _probe_one(url):
         try:

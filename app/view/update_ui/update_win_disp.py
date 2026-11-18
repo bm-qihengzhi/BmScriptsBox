@@ -6,10 +6,14 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 
 
-from PySide2.QtCore import QTimer, Signal
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QApplication, QStackedWidget
+import webbrowser
+
+from PySide6.QtCore import QTimer, Signal, QPoint, QRect, Qt
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QApplication,
+                               QStackedWidget, QFrame)
 from app.utils import BmTools
-from xsideui import  XLabel, XPushButton, XProgressBar, XButtonVariant, XSize, tr, XDialog
+from xsideui import (XLabel, XPushButton, XProgressBar, XButtonVariant, XSize,
+                     tr, XDialog, XColor, XScrollArea)
 
 try:
     from app.cloud.works import UpdateDownLoadTask
@@ -22,16 +26,71 @@ class UpdateWidget(XDialog):
     """软件更新小部件"""
     completed_single = Signal(str)
 
-    def __init__(self, version: str, diff: list, remote_details: dict = None, parent=None):
+    def __init__(self, version: str, diff: list, remote_details: dict = None,
+                 changelog=None, local_version: str = None, removed: list = None,
+                 parent=None):
         super().__init__(parent=parent)
         self.version = version
         self.diff = diff
         self.remote_details = remote_details
+        self._local_version = local_version
+        self._removed = list(removed or [])
+        self._summary, self._groups = self._normalize_changelog(changelog)
+        self._notes_url = ""
+        if isinstance(changelog, dict):
+            url = changelog.get("url")
+            if isinstance(url, str) and url.strip():
+                self._notes_url = url.strip()
         self._setup_ui()
         self._preload_widgets()
 
+    @staticmethod
+    def _normalize_changelog(changelog):
+        """把云端 changelog 归一成 (summary, [(title, [items])])。
+
+        支持对象（summary + groups）与纯字符串（按行拆分）两种写法；
+        任何脏数据都降级为空，保证弹窗不会因为字段异常打不开。
+        """
+        if not changelog:
+            return None, []
+
+        if isinstance(changelog, str):
+            items = [line.strip() for line in changelog.splitlines() if line.strip()]
+            return None, [(None, items)] if items else []
+
+        if not isinstance(changelog, dict):
+            return None, []
+
+        summary = changelog.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            summary = None
+
+        groups = []
+        raw_groups = changelog.get("groups")
+        if isinstance(raw_groups, list):
+            for group in raw_groups:
+                if not isinstance(group, dict):
+                    continue
+                items = [str(item).strip() for item in (group.get("items") or [])
+                         if str(item).strip()]
+                if not items:
+                    continue
+                title = group.get("title")
+                title = title.strip() if isinstance(title, str) and title.strip() else None
+                groups.append((title, items))
+
+        return summary, groups
+
+    @property
+    def _has_notes(self) -> bool:
+        return bool(self._groups or self._summary)
+
     def _setup_ui(self):
-        self.setMinimumWidth(260)
+        # 有更新内容时放宽窗口；无内容保持原来的紧凑形态
+        self.setMinimumWidth(380 if self._has_notes else 260)
+        if self._has_notes:
+            self.setMaximumWidth(520)
+        self.hide_title_bar()
         self.hide_maximize_button()
         self.hide_minimize_button()
         self.hide_theme_button()
@@ -45,9 +104,8 @@ class UpdateWidget(XDialog):
         self.stack.setCurrentIndex(0)
         self._single()
 
-        if self.parent():
-            # 设置模态显示
-            self.setModal(True)
+        self.setModal(False)
+        self.setWindowModality(Qt.NonModal)
 
     def showEvent(self, event):
         """窗口显示事件"""
@@ -56,13 +114,24 @@ class UpdateWidget(XDialog):
             self._position_at_parent_bottom_right()
 
     def _position_at_parent_bottom_right(self):
-        """将窗口定位到父窗口右下角"""
-        if self.parent():
-            parent_geometry = self.parent().geometry()
-            self.move(
-                parent_geometry.right() - self.width() - 10,
-                parent_geometry.bottom() - self.height() - 10
-            )
+        """将可见内容区定位到父窗口右下角"""
+        parent = self.parent()
+        if not parent:
+            return
+        parent_rect = QRect(parent.mapToGlobal(QPoint(0, 0)), parent.size())
+        visible = self.content_global_rect()
+        target_x = parent_rect.right() - visible.width() - 10
+        target_y = parent_rect.bottom() - visible.height() - 10
+
+        # 窗口加宽后父窗口贴屏幕边缘时可能出屏，钳制到可用区域内
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            target_x = max(avail.left(), min(target_x, avail.right() - visible.width() + 1))
+            target_y = max(avail.top(), min(target_y, avail.bottom() - visible.height() + 1))
+
+        self.move(self.x() + target_x - visible.left(),
+                  self.y() + target_y - visible.top())
 
     def _preload_widgets(self):
         """预加载所有页面以确保流畅切换"""
@@ -71,23 +140,26 @@ class UpdateWidget(XDialog):
             widget.adjustSize()
             widget.update()
 
-        # 处理一次待处理的事件
-        QApplication.processEvents()
-
     def update_prompt(self):
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
         layout.setSpacing(11)
-        layout.setContentsMargins(11, 11, 11, 11)
-        layout.addWidget(XLabel(tr('Update available. Please install the latest version')))
+        layout.setContentsMargins(11, 20, 11, 11)
+
+        if self._has_notes:
+            self._build_notes_section(layout)
+        else:
+            layout.addWidget(XLabel(tr('Update available. Please install the latest version')))
 
         btn_layout = QHBoxLayout()
         self.btn_ignore = XPushButton(
             text=tr('Later'),
             variant=XButtonVariant.OUTLINED,
             size=XSize.SMALL,
+            color=XColor.TERTIARY,
         )
         self.btn_update = XPushButton(
+            variant=XButtonVariant.FILLED,
             text=tr('Update Now'),
             size=XSize.SMALL,
         )
@@ -97,6 +169,52 @@ class UpdateWidget(XDialog):
 
         layout.addLayout(btn_layout)
         self.stack.addWidget(content_widget)
+
+    def _build_notes_section(self, layout: QVBoxLayout):
+        """版本行 + 概述 + 分组条目（可滚动） + 完整说明链接"""
+        version_text = (f"{self._local_version} → {self.version}"
+                        if self._local_version and self.version
+                        else str(self.version or ""))
+        if version_text:
+            layout.addWidget(XLabel(version_text, style=XLabel.Style.SECONDARY))
+
+        if self._summary:
+            layout.addWidget(XLabel(self._summary, word_wrap=True))
+
+        if self._groups:
+            layout.addWidget(self._build_groups_area())
+
+        if self._notes_url:
+            link = XPushButton(
+                text=tr('View full release notes'),
+                variant=XButtonVariant.TEXT,
+                size=XSize.SMALL,
+                color=XColor.PRIMARY,
+            )
+            link.clicked.connect(lambda: webbrowser.open_new_tab(self._notes_url))
+            layout.addWidget(link)
+
+    def _build_groups_area(self) -> QWidget:
+        """把分组条目塞进固定最大高度的滚动区，内容再多也不撑破窗口"""
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setContentsMargins(0, 0, 0, 0)
+        inner_layout.setSpacing(6)
+
+        for title, items in self._groups:
+            if title:
+                inner_layout.addWidget(XLabel(title, style=XLabel.Style.H4))
+            for item in items:
+                inner_layout.addWidget(XLabel("· " + item, word_wrap=True))
+        inner_layout.addStretch()
+
+        scroll = XScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.set_scrollbar_visible(True, False)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(inner)
+        scroll.setMaximumHeight(240)
+        return scroll
 
     def update_tails(self):
         tails_widget = QWidget()
@@ -131,7 +249,8 @@ class UpdateWidget(XDialog):
 
     def _start_download(self):
         """执行下载"""
-        self.update_task = UpdateDownLoadTask(self.diff, self.remote_details)
+        self.update_task = UpdateDownLoadTask(
+            self.diff, self.remote_details, self._removed)
         self.update_task.progressed.connect(self.update_details)
         self.update_task.completed.connect(self.download_complete)
         self.update_task.start()
@@ -152,9 +271,10 @@ class UpdateWidget(XDialog):
 
     def closeEvent(self, event):
         """确保窗口关闭时停止下载任务"""
-        if hasattr(self, 'update_task') and self.update_task.isRunning():
-            self.update_task.terminate()  # 或者更优雅的 stop 逻辑
-            self.update_task.wait()
+        task = getattr(self, 'update_task', None)
+        if task is not None and task.isRunning():
+            task.terminate()
+            task.wait(1000)
         super().closeEvent(event)
 
 
@@ -162,4 +282,4 @@ if __name__ == '__main__':
     app = QApplication([])
     win = UpdateWidget('1.1', [])
     win.show()
-    app.exec_()
+    app.exec()

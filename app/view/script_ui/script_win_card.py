@@ -6,26 +6,30 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import webbrowser
 
-from PySide2.QtCore import Qt, Signal, QUrl, QSize
-from PySide2.QtGui import QDesktopServices
-from PySide2.QtWidgets import QVBoxLayout, QFrame, QLabel, QSizePolicy
+from PySide6.QtCore import Qt, Signal, QTimer, QUrl, QSize
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QVBoxLayout, QFrame, QLabel, QSizePolicy
 
-from app.data import ScriptDatabase, ProjectGlobal
+from app.data import ProjectGlobal
 from app.utils import BM_LOG, BmNotify
+from app.utils.badge import is_local_badge, badge_label_style, badge_text
 from app.utils.tools import BmTools
 from xsideui import XCard, XLabel, XImage, XMenu, \
-    IconName, XIcon, XColor, tr
+    IconName, XIcon, XColor, tr, theme_manager
+
+
+class CardTitleLabel(XLabel):
+    def resizeEvent(self, event):
+        QLabel.resizeEvent(self, event)
+        if (self._elide_mode
+                and event.oldSize().width() != event.size().width()):
+            QTimer.singleShot(0, self.update_elided_text)
 
 
 class ScriptCard(XCard):
     """
     脚本卡片
     """
-
-    # 文本徽章颜色映射（badge 文本 → 背景色）
-    BADGE_COLORS = {
-        '本地': '#909399',
-    }
 
     MIN_CARD_W = 140
 
@@ -42,6 +46,7 @@ class ScriptCard(XCard):
         self._badge_label = None
         self._setup_ui()
         self._setup_badges()
+        theme_manager.theme_changed.connect(self._refresh_badges)
 
     def update_data(self, script_info):
         """就地更新卡片数据（复用卡片实例，避免整表重建导致图标重载）"""
@@ -63,20 +68,13 @@ class ScriptCard(XCard):
 
         self._refresh_badges()
 
+    @staticmethod
+    def preferred_height(dpi_y: float) -> int:
+        """按 DPI 计算卡片建议高度，供流式布局与窗口尺寸共用"""
+        return max(60, int(80 * (dpi_y / 96.0)))
+
     def sizeHint(self):
-        # 根据父容器实际可用宽度自适应列数，卡片在该列数下铺满，避免临界宽度下挤成少列
-        parent = self.parentWidget()
-        if parent and parent.layout():
-            margins = parent.layout().contentsMargins()
-            spacing = parent.layout().spacing()
-            avail = parent.width() - margins.left() - margins.right()
-            cols = max(1, (avail + spacing) // (self.MIN_CARD_W + spacing))
-            card_w = (avail - (cols - 1) * spacing) // cols
-        else:
-            card_w = self.MIN_CARD_W
-        scale = self.logicalDpiY() / 96.0  # 高 DPI 缩放系数
-        card_h = max(60, int(80 * scale))  # 80 是基准高度，按比例放大
-        return QSize(card_w, card_h)
+        return QSize(self.MIN_CARD_W, ScriptCard.preferred_height(self.logicalDpiY()))
 
     def minimumSizeHint(self):
         # 最小宽度与建议宽度一致，长文本不得撑开流式布局
@@ -114,7 +112,8 @@ class ScriptCard(XCard):
         """添加中央布局"""
         # 不能给 addWidget 传 alignment：那会让标签按 sizeHint 摆放（构造时被省略成 ...，sizeHint 塌缩）
         # 改为标签填满卡片宽（Ignored），文本在标签内部居中
-        self.title_label = XLabel(self.script_info.name, elide_mode=True, alignment=Qt.AlignCenter)
+        self.title_label = CardTitleLabel(
+            self.script_info.name, elide_mode=True, alignment=Qt.AlignCenter)
         self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.content_layout.addWidget(self.title_label)
         self.title_label.setContextMenuPolicy(Qt.NoContextMenu)  # 禁用右键菜单
@@ -141,27 +140,18 @@ class ScriptCard(XCard):
             self._pin_label.show()  # 手动定位子控件：在已可见卡片上动态创建须显式 show
 
         # 文本徽章
-        badge_text = self.script_info.badge
-        if badge_text:
-            badge_color = ScriptCard.BADGE_COLORS.get(badge_text, '#909399')
-            self._badge_label = QLabel(badge_text, self)
-            self._badge_label.setStyleSheet(
-                f"QLabel {{"
-                f"  background-color: {badge_color};"
-                f"  color: #F1F1F1;"
-                f"  padding: 1px 6px;"
-                f"  border-radius: 4px;"
-                f"  font-size: 11px;"
-                f"}}"
-            )
+        label_text = badge_text(self.script_info.badge)
+        if label_text:
+            self._badge_label = QLabel(label_text, self)
+            self._badge_label.setStyleSheet(badge_label_style(self.script_info.badge))
             self._badge_label.adjustSize()
             self._badge_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             self._badge_label.show()  # 同上：动态创建须显式 show
 
         self._position_badges()
 
-    def _refresh_badges(self):
-        """数据更新后刷新角标/徽章"""
+    def _refresh_badges(self, *args):
+        """数据更新或主题切换后刷新角标/徽章"""
         self._setup_badges()
 
     def _position_badges(self):
@@ -189,11 +179,11 @@ class ScriptCard(XCard):
         else:
             menu.add_action(icon=XIcon(IconName.PIN_FILL).icon(), text=tr('Pin'), triggered=self._pinned_top)
         menu.add_action(text=tr('Details'), icon=XIcon(IconName.INFO).icon(), triggered=self._show_info)
-        if self.script_info.badge != '本地':
+        if not is_local_badge(self.script_info.badge):
             menu.add_action(text=tr('Star'), icon=XIcon(IconName.STAR).icon(), triggered=self._show_info)
             menu.add_action(text=tr('Report'), icon=XIcon(IconName.REPORT).icon(), triggered=self._show_info)
         menu.add_action(text=tr('Open Location'), icon=XIcon(IconName.FOLDER).icon(), triggered=self._show_folder)
-        menu.exec_(self.mapToGlobal(pos))
+        menu.exec(self.mapToGlobal(pos))
 
     def _show_folder(self):
         """显示脚本目录"""
@@ -216,6 +206,7 @@ class ScriptCard(XCard):
         """
         try:
             new_pin = not self.script_info.pin
+            from app.data import ScriptDatabase
             self.db = ScriptDatabase()
             self.db.update_status(self.script_info.id, 'pin', new_pin)
             # 不再就地改 self.script_info：否则复用分支的 update_data 会误判为“无变化”而跳过角标刷新

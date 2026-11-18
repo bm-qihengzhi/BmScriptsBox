@@ -6,8 +6,8 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from pathlib import Path
 from typing import Optional
-from PySide2.QtCore import QObject, Signal
-from app.utils import BM_LOG, BmTools
+from PySide6.QtCore import QObject, Signal
+from app.utils import BmError, BM_LOG, BmTools
 from app.servers.packages import PackagesManager
 
 
@@ -43,7 +43,7 @@ class AhkEnvManager(QObject):
                 self._emit_progress("AHK 环境就绪", True)
                 return ahk_exe_path
             else:
-                raise FileNotFoundError(f"未找到 AHK 执行文件: {ahk_exe_path}")
+                raise BmError('env.ahk.missing', path=str(ahk_exe_path))
 
         except Exception as e:
             error_msg = f"AHK 环境配置失败: {str(e)}"

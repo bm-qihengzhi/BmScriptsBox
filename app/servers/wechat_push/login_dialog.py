@@ -12,9 +12,9 @@ import base64
 import re
 import threading
 
-from PySide2.QtCore import QThread, Signal, Qt
-from PySide2.QtGui import QPixmap, QImage, QPainter, QColor
-from PySide2.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtGui import QPixmap, QImage, QPainter, QColor
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
 
 from xsideui import XDialog, XLabel, XLineEdit, XPushButton, XButtonVariant, XSize, XColor, tr
 
@@ -223,14 +223,14 @@ class WechatLoginDialog(XDialog):
     def _init_ui(self):
         self.hide_title_bar()
         bind_only = self._mode == 'bind'
-        self.resize(352, 250 if bind_only else 470)
+        self.resize_content(352, 250 if bind_only else 470)
         frame = QFrame()
         self.addWidget(frame)
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(20, 20, 20, 20)
         lay.setSpacing(10)
 
-        self._title = XLabel('重新绑定收件人' if bind_only else tr('微信扫码登录'),
+        self._title = XLabel('重新绑定收件人' if bind_only else tr('Scan with WeChat to sign in'),
                              alignment=Qt.AlignHCenter)
         lay.addWidget(self._title, alignment=Qt.AlignHCenter)
 
@@ -253,7 +253,7 @@ class WechatLoginDialog(XDialog):
         self._code_row = QHBoxLayout()
         self._code_edit = XLineEdit(placeholder='000000')
         self._code_edit.setMaximumWidth(120)
-        self._code_confirm = XPushButton(text=tr('确认'), variant=XButtonVariant.FILLED, )
+        self._code_confirm = XPushButton(text=tr('Confirm'), variant=XButtonVariant.FILLED, )
         self._code_row.addStretch()
         self._code_row.addWidget(self._code_edit)
         self._code_row.addWidget(self._code_confirm)

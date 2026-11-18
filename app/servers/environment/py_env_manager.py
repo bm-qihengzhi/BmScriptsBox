@@ -11,9 +11,11 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Optional, Tuple, List
-from PySide2.QtCore import QObject, Signal, QCoreApplication
+from PySide6.QtCore import QObject, Signal, QCoreApplication
 
-from app.utils import BM_LOG, BmTools
+from xsideui import XI18N
+
+from app.utils import BmError, BM_LOG, BmTools
 from app.servers.packages import PackagesManager
 
 class PyEnvManager(QObject):
@@ -76,7 +78,7 @@ class PyEnvManager(QObject):
                 self._emit_progress("Python 环境配置已完成", True)
                 return True
             else:
-                raise RuntimeError("虚拟环境文件校验未通过")
+                raise BmError('env.python.venv_invalid')
 
         except Exception as e:
             error_msg = f"环境配置失败: {str(e)}"
@@ -94,14 +96,15 @@ class PyEnvManager(QObject):
         venv_python = self._find_python_path(script_dir)
 
         if not venv_python:
-            raise RuntimeError("无法定位虚拟环境中的 Python 解释器")
+            raise BmError('env.python.venv_invalid')
 
         # 清理过期构建缓存，防止 python38.dll 与 python310.dll 冲突
         self._clean_uv_build_cache(script_path)
 
         # 执行 uv sync（流式，逐行发射进度）
         cmd_args = ['sync', '--python', str(venv_python)]
-        self._run_uv_streaming(cmd_args, script_path, "依赖同步", timeout)
+        self._run_uv_streaming(cmd_args, script_path,
+                               XI18N.x_tr("Sync dependencies"), timeout)
 
         self._emit_progress("依赖包安装完成")
         return True
@@ -135,7 +138,8 @@ class PyEnvManager(QObject):
             str(venv_path)
         ]
 
-        result = self._run_subprocess(args, Path(script_dir), "创建虚拟环境", timeout)
+        result = self._run_subprocess(args, Path(script_dir),
+                                      XI18N.x_tr("Create virtual environment"), timeout)
 
         exec_time = time.time() - start_time
         BM_LOG.info(f"虚拟环境创建成功，耗时: {exec_time:.2f}s")
@@ -152,7 +156,7 @@ class PyEnvManager(QObject):
 
         source = Path(tk_dir)
         if not source.exists():
-            raise FileNotFoundError(f"Tkinter 源目录不存在: {tk_dir}")
+            raise BmError('env.python.tk_missing', path=str(tk_dir))
 
         try:
             for item in source.iterdir():
@@ -164,7 +168,7 @@ class PyEnvManager(QObject):
                 else:
                     shutil.copy2(item, dest)
         except Exception as e:
-            raise RuntimeError(f"Tkinter 补丁应用失败: {e}")
+            raise BmError('env.python.tk_patch_failed') from e
 
     # --- 辅助与校验方法 ---
 
@@ -193,23 +197,23 @@ class PyEnvManager(QObject):
                 if result.stderr.strip():
                     BM_LOG.error(f"stderr:\n{result.stderr.strip()}")
                 error_msg = self._parse_error_details(result)
-                raise RuntimeError(f"{task_name}失败: {error_msg}")
+                raise BmError('env.task.failed', task=task_name)
             return result
 
         except subprocess.TimeoutExpired:
-            raise RuntimeError(f"{task_name}操作超时（{timeout}秒）")
+            raise BmError('env.task.timeout', task=task_name, seconds=timeout)
         except Exception as e:
-            raise RuntimeError(f"调用系统组件异常: {e}")
+            raise BmError('env.system.call_failed') from e
 
     def _validate_before_install(self, script_dir: str, venv_path: Path):
         """安装前的全量检查"""
         # 1. 目录检查
         if not Path(script_dir).exists():
-            raise FileNotFoundError(f"脚本工作目录不存在: {script_dir}")
+            raise BmError('env.script.dir_missing', path=str(script_dir))
 
         # 2. 磁盘空间检查
         if not self._check_disk_space(script_dir, min_mb=500):
-            raise RuntimeError("磁盘空间不足，建议保留至少 500MB 可用空间")
+            raise BmError('env.disk.low_space')
 
         # 3. 如果环境已存在，仅记录日志，不阻断流程
         if venv_path.exists():
@@ -325,7 +329,7 @@ class PyEnvManager(QObject):
                 break
             if time.time() - _wait_start > timeout:
                 process.kill()
-                raise RuntimeError(f"{task_name}操作超时（{timeout}秒）")
+                raise BmError('env.task.timeout', task=task_name, seconds=timeout)
             time.sleep(0.05)
 
         stdout_thread.join(timeout=5)
@@ -340,7 +344,7 @@ class PyEnvManager(QObject):
             if stderr_text.strip():
                 BM_LOG.error(f"stderr:\n{stderr_text.strip()}")
             error_msg = self._parse_error_from_text(stderr_text or stdout_text)
-            raise RuntimeError(f"{task_name}失败: {error_msg}")
+            raise BmError('env.task.failed', task=task_name)
 
     def _parse_error_details(self, result: subprocess.CompletedProcess) -> str:
         """从结果中提取核心错误信息"""

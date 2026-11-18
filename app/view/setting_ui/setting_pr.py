@@ -10,11 +10,11 @@ import webbrowser
 import winreg
 from pathlib import Path
 
-from PySide2.QtCore import QThread, Signal, QTimer
+from PySide6.QtCore import QThread, Signal, QTimer
 
-from xsideui import XLoadingMask, XNotif, XI18N, theme_manager
+from xsideui import XLoadingMask, XNotif, XI18N, theme_manager, tr
 
-from app.data import ScriptDatabase, ProjectGlobal, ConfigDatabase, TaskDatabase
+from app.data import ProjectGlobal
 from app.utils import BmNotify, async_logger_manager, BmTools, BM_LOG
 from app.servers.monitor import get_double_monitor
 
@@ -69,11 +69,15 @@ class SettingPresenter:
             theme_manager.set_theme('dark')
 
     def update_hotkey(self, index):
+        from app.data import ConfigDatabase
+
         hotkey = self.view.hotkey_combo.currentText()
         ConfigDatabase.update_item('shortcut_key_rouse', [hotkey.lower()])
         get_double_monitor().update_configs(new_keys=[hotkey])
 
     def update_setting(self, state, name):
+        from app.data import ConfigDatabase
+
         ConfigDatabase.update_item(name, state)
         ProjectGlobal.CONFIG = ConfigDatabase.get_all()
 
@@ -89,10 +93,10 @@ class SettingPresenter:
         """
         try:
             async_logger_manager.clear_log_content()
-            BmNotify().show_success_notify('日志已清空', in_window=True, position=XNotif.Pos.CENTER)
+            BmNotify().show_success_notify(tr('Logs cleared'), in_window=True, position=XNotif.Pos.CENTER)
         except Exception as e:
             BM_LOG.error(f'清理日志失败:{e}')
-            BmNotify().show_error_notify('清理日志失败', in_window=True, position=XNotif.Pos.CENTER)
+            BmNotify().show_error_notify(tr('Failed to clear logs'), in_window=True, position=XNotif.Pos.CENTER)
 
     def add_to_startup(self, state):
         """添加到启动项"""
@@ -184,6 +188,7 @@ class ReadConfigThread(QThread):
 
     def run(self):
         if self.db is None:
+            from app.data import ConfigDatabase
             self.db = ConfigDatabase()
         config = self.db.get_all()
         ProjectGlobal.CONFIG = config

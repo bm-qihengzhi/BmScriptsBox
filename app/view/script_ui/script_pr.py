@@ -7,7 +7,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import json
 import webbrowser
 
-from PySide2.QtCore import Signal, QObject
+from PySide6.QtCore import Signal, QObject
 from xsideui import tr
 from app.utils import BmNotify, BmTools, BM_LOG
 from app.utils.pinyin_search import PinyinSearchIndex, HAS_PYPINYIN
@@ -19,7 +19,6 @@ class ScriptPresenter(QObject):
     scripts_loaded = Signal(list)
     banner_loaded = Signal(list)
     banner_clicked = Signal(str)
-    show_window = Signal()
 
     def __init__(self):
         super().__init__()
@@ -32,10 +31,16 @@ class ScriptPresenter(QObject):
             BM_LOG.warning("pypinyin 不可用，脚本卡片搜索仅支持原名匹配")
 
     def lazy_loading(self):
+        self.load_banner()
+        self.load_scripts()
+
+    def load_banner(self):
         try:
             self._load_banner()
         except Exception as e:
             BM_LOG.error(f"加载 banner 失败: {e}")
+
+    def load_scripts(self):
         self._load_scripts()
 
     def _load_banner(self):
@@ -97,32 +102,31 @@ class ScriptPresenter(QObject):
     def _on_uninstall_script(self, data):
         if data.get('state'):
             self.refresh_scripts()
-            BmNotify().show_success_notify(content=tr('卸载完成'), in_window=True)
+            BmNotify().show_success_notify(content=tr('Uninstalled'), in_window=True)
             return
         else:
-            BmNotify().show_error_notify(content=tr('卸载失败'), in_window=True)
+            BmNotify().show_error_notify(content=tr('Uninstall failed'), in_window=True)
             return
 
-    def execute_script(self, script_id):
+    def execute_script(self, script_id, data=None, params_overrides=None,
+                       source='card'):
         from app.servers.scripts import (
             ScriptLaunchService, ScriptBusyError, ScriptNotFoundError)
         from app.works.script_work import ExecuteScriptWork
 
         try:
             ctx = ScriptLaunchService.prepare(
-                script_id, invoke_mode='manual', allow_params_form=True,
-                reserve_first=True, source='card')
+                script_id, data=data, params_overrides=params_overrides,
+                invoke_mode='manual', allow_params_form=True,
+                reserve_first=True, source=source)
         except ScriptBusyError:
             BM_LOG.warning(f"脚本 {script_id} 正在执行中，跳过重复触发")
-            BmNotify().show_warning_notify("脚本正在运行中，请等待完成")
-            self.show_window.emit()
+            BmNotify().show_warning_notify(tr("The script is running, please wait"))
             return
         except ScriptNotFoundError as e:
             BmNotify().show_error_notify(content=str(e))
-            self.show_window.emit()
             return
         if ctx is None:  # 参数表单被取消
-            self.show_window.emit()
             return
 
         worker = ExecuteScriptWork(ctx)
@@ -136,7 +140,7 @@ class ScriptPresenter(QObject):
             self._execute_workers.pop(script_id, None)
             ScriptLaunchService.cleanup(ctx)
             BM_LOG.error(f"启动执行线程失败 {script_id}: {e}")
-            BmNotify().show_error_notify(content=tr('Executing Failed'))
+            BmNotify().show_error_notify(content=tr('Execution Failed'))
 
     def uninstall_script(self, script_id):
         from app.works.script_work import UninstallScriptWork
@@ -151,8 +155,7 @@ class ScriptPresenter(QObject):
 
     def _on_executed(self, state):
         if state:
-            BmNotify().show_info_notify(content=tr('正在执行脚本'))
+            BmNotify().show_info_notify(content=tr('Running script'))
         else:
-            BmNotify().show_error_notify(content=tr('脚本执行失败，详细请看日志'))
-            self.show_window.emit()
+            BmNotify().show_error_notify(content=tr('The script failed, see the log for details'))
 

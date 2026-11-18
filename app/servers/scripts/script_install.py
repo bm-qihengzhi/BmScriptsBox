@@ -13,10 +13,11 @@ import traceback
 import zipfile
 from pathlib import Path
 
-from PySide2.QtCore import Signal, QObject, QCoreApplication
+from PySide6.QtCore import Signal, QObject, QCoreApplication
 
 from app.data import ScriptDatabase
-from app.utils import BmTools, BM_LOG
+from app.utils import BmError, BmTools, BM_LOG
+from app.utils.badge import LOCAL_BADGE
 from app.cloud.api import UserApi
 from app.servers.context import ContextManager
 from app.servers.packages import PackagesManager
@@ -75,7 +76,7 @@ class InstallScript(QObject):
         try:
             # 依赖循环检测
             if script_id in self._installing_deps:
-                raise RuntimeError(f"脚本依赖存在循环: {script_id}")
+                raise BmError('install.dependency.cycle', script_id=script_id)
             self._installing_deps.add(script_id)
 
             # 0：记录是否覆盖既有安装（失败回滚时据此保留旧版本）
@@ -93,7 +94,7 @@ class InstallScript(QObject):
 
             # 3：克隆仓库（失败即止，不用坏目录继续）
             if not self._download_from_git(script_git_url, install_target_dir, branch):
-                raise RuntimeError("脚本仓库下载失败，请检查仓库地址或网络")
+                raise BmError('install.repo.download_failed')
 
             # 4. 配置加载
             config = self._load_config(install_target_dir)
@@ -118,7 +119,7 @@ class InstallScript(QObject):
                 cost = time.time() - start_time
                 self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
         except Exception as e:
-            BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()}")
+            BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()} | {e!r}")
             self._perform_rollback(installed_resources, script_id if 'script_id' in locals() else None)
             if notify:
                 self._notify_finished(False, self._format_friendly_error(e))
@@ -141,7 +142,7 @@ class InstallScript(QObject):
             temp_dir = Path(tempfile.mkdtemp(prefix='bms_'))
             installed_resources["target_dir"] = temp_dir
             if not self._download_from_git(script_git_url, temp_dir, branch):
-                raise RuntimeError("脚本仓库下载失败，请检查仓库地址或网络")
+                raise BmError('install.repo.download_failed')
 
             # 2. 读取 config 获得 script_id
             config = self._load_config(temp_dir)
@@ -177,7 +178,7 @@ class InstallScript(QObject):
             else:
                 BM_LOG.info(f"脚本 {script_id} 依赖无变化，跳过环境部署")
 
-            self._register_system(config, '本地', resources=installed_resources)
+            self._register_system(config, LOCAL_BADGE, resources=installed_resources)
             self._mark_installed(final_dir)
             self._install_script_dependencies(config, installed_resources["new_deps"])
 
@@ -185,7 +186,7 @@ class InstallScript(QObject):
             self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
 
         except Exception as e:
-            BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()}")
+            BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()} | {e!r}")
             self._perform_rollback(installed_resources, script_id)
             self._notify_finished(False, self._format_friendly_error(e))
 
@@ -231,7 +232,7 @@ class InstallScript(QObject):
                 BM_LOG.info(f"脚本 {script_id} 依赖无变化，跳过环境部署")
 
             # 5. 系统集成 (DB与右键菜单)
-            self._register_system(config, '本地', resources=installed_resources)
+            self._register_system(config, LOCAL_BADGE, resources=installed_resources)
 
             # 6. 安装标记 + 先装本体，再装依赖
             self._mark_installed(install_target_dir)
@@ -242,7 +243,7 @@ class InstallScript(QObject):
             self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
 
         except Exception as e:
-            BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()}")
+            BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()} | {e!r}")
             self._perform_rollback(installed_resources, script_id if 'script_id' in locals() else None)
             self._notify_finished(False, self._format_friendly_error(e))
 
@@ -258,7 +259,7 @@ class InstallScript(QObject):
     def _install_single_dependency(self, config, did: str) -> bool:
         """返回 True 表示本次新装（此前不存在），False 表示已存在/跳过"""
         if len(self._installing_deps) >= self.MAX_DEPTH:
-            raise RuntimeError(f"脚本依赖链过深（>{self.MAX_DEPTH} 层），请检查依赖声明")
+            raise BmError('install.dependency.too_deep', limit=self.MAX_DEPTH)
         if ScriptDatabase.get_script_by_id(did):
             self._emit_progress(f"依赖脚本 {did} 已安装，跳过")
             return False
@@ -283,7 +284,7 @@ class InstallScript(QObject):
         elif isinstance(remote, dict):
             info = remote.get(did) or {}
         if not resp.get('success') or not info.get('repository_url'):
-            raise RuntimeError(f"缺少依赖脚本 {did}: 未在社区发布或解析失败")
+            raise BmError('install.dependency.missing', script_id=did)
         return info['repository_url'], info.get('default_branch') or 'main'
 
     # --- 私有步骤拆解 ---
@@ -548,7 +549,7 @@ class InstallScript(QObject):
             self._emit_progress("初始化脚本目录完成")
             return script_dir
         except Exception as e:
-            raise RuntimeError(f"目录初始化失败: {e}")
+            raise BmError('install.fs.init_failed', path=script_id) from e
 
     def _is_existing_install(self, script_dir: Path) -> bool:
         """判断目标目录是否是一个有效的既有安装（用于回滚时保留旧版本）"""
@@ -584,7 +585,7 @@ class InstallScript(QObject):
             self._emit_progress("解压包文件完成")
             return toml_file.parent
         except Exception as e:
-            raise RuntimeError(f"解压过程出错: {e}")
+            raise BmError('install.extract.failed') from e
 
     def _load_config(self, script_dir: Path):
         """
@@ -597,7 +598,7 @@ class InstallScript(QObject):
         if not result.success:
             # 聚合所有错误信息并抛出，由 install_from_local 的 try-except 统一捕获
             error_details = " | ".join(result.error_messages)
-            raise ValueError(f"配置文件读取失败: {error_details}")
+            raise BmError('install.config.read_failed')
 
         # 返回序列化后的 config 对象
         return result.config
@@ -665,7 +666,7 @@ class InstallScript(QObject):
             mm = ModelManager()
             mm.model_progress.connect(lambda d: self.progress_signal.emit(d))
             if not mm.batch_download(config.models):
-                raise RuntimeError("模型下载失败，安装已终止")
+                raise BmError('install.model.download_failed')
 
     def _register_system(self, config, badge:str='', resources: dict = None):
         """执行数据库持久化和系统菜单注册（逐步回填 resources 标记，供失败回滚精确清理）"""
@@ -707,6 +708,8 @@ class InstallScript(QObject):
         self.finished_signal.emit({'status': success, 'msg': msg})
 
     def _format_friendly_error(self, error: Exception) -> str:
+        if isinstance(error, BmError):
+            return str(error)
         err_str = str(error).strip()
         if "ProxyError" in err_str: return "网络代理异常..."
         if "timeout" in err_str.lower(): return "请求超时..."

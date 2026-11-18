@@ -8,7 +8,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 自动区分 GUI 线程 / 非 GUI 线程——热键(QThread)、右键(Flask HTTP 线程)等非 GUI 线程
 经一个常驻 GUI 线程的桥阻塞等结果。
 """
-from PySide2.QtCore import QObject, Signal, Qt, QThread
+from PySide6.QtCore import QObject, Signal, Qt, QThread
 
 from app.utils import BmNotify
 from .params_prompt_dialog import ParamsPromptDialog
@@ -16,7 +16,9 @@ from .params_prompt_dialog import ParamsPromptDialog
 
 class _PromptBridge(QObject):
     """常驻 GUI 线程的桥：非 GUI 线程 emit 后阻塞，直到 GUI 弹窗完成写回结果。"""
-    requested = Signal(dict)
+    # 必须用 object 而不是 dict：跨线程投递 dict 会被 PySide6 转成 QVariantMap 深拷贝，
+    # _run 里写回的 payload['result'] 落在副本上，调用方永远读到 None（被当成用户取消）
+    requested = Signal(object)
 
     def _run(self, payload):
         result = None
@@ -29,7 +31,7 @@ class _PromptBridge(QObject):
                     default_data=payload.get('data') or [],
                     prefill_params=payload.get('prefill') or None,
                 )
-                if dlg.exec_():
+                if dlg.exec():
                     result = (dlg.get_inputs_value(), dlg.get_params_overrides())
         except Exception as e:
             from app.utils import BM_LOG
@@ -51,11 +53,13 @@ def _ensure_bridge(gui_window):
         _bridge_connected = True
 
 
-def _save_memory(script_id, params):
-    """参数确认运行后，记住上次的值供下次回填"""
+def _save_memory(script_id, params, params_defs=None):
+    """参数确认运行后，记住上次的值供下次回填。
+    secret 字段不落记忆：密码框只做回显遮蔽，明文存库会让 token 长期留在库里"""
     try:
         from app.data.database import ScriptDatabase
-        ScriptDatabase().save_param_memory(script_id, params)
+        from app.utils.params_validate import strip_secret
+        ScriptDatabase().save_param_memory(script_id, strip_secret(params, params_defs))
     except Exception:
         pass
 
@@ -79,10 +83,10 @@ def show_params_prompt(script_info, default_data, parent=None):
         try:
             dlg = ParamsPromptDialog(script_info, parent=window, default_data=default_data or [],
                                      prefill_params=memory or None)
-            if not dlg.exec_():
+            if not dlg.exec():
                 return None
             params = dlg.get_params_overrides()
-            _save_memory(script_info.id, params)
+            _save_memory(script_info.id, params, getattr(script_info, 'params_schema', None))
             return (dlg.get_inputs_value(), params)
         except Exception as e:
             BM_LOG.error(f"参数表单弹窗异常: {e}")
@@ -105,5 +109,5 @@ def show_params_prompt(script_info, default_data, parent=None):
     result = payload.get('result')
     if result is not None:
         params = result[1]
-        _save_memory(script_info.id, params)
+        _save_memory(script_info.id, params, getattr(script_info, 'params_schema', None))
     return result

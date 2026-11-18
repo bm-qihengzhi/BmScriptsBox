@@ -7,11 +7,12 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import json
 from typing import Any, Dict
 
-from PySide2.QtCore import Qt, QPoint, QRect, QSize
-from PySide2.QtGui import QCursor
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
+from PySide6.QtCore import Qt, QPoint, QRect, QSize
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
 
-from xsideui import XCheckBox, XDoubleSpinBox, XSpinBox, XComboBox, XLineEdit, XTextEdit, XLabel, XMenu, XFlowLayout
+from xsideui import (XCheckBox, XDoubleSpinBox, XSpinBox, XComboBox, XLineEdit,
+                     XTextEdit, XLabel, XMenu, XFlowLayout, tr)
 
 
 def make_header_row(name: str, label: str, trailing=None) -> QWidget:
@@ -34,9 +35,9 @@ def browse_append_to_edit(parent: QWidget, edit: QWidget, pick: str, exts: list)
     files→文件多选；folders→文件夹；both→先弹「选择文件…/选择文件夹…」菜单再开对应选择器。"""
     if pick == 'both':
         menu = XMenu(parent=parent)
-        act_file = menu.add_action("选择文件…")
-        act_folder = menu.add_action("选择文件夹…")
-        chosen = menu.exec_(QCursor.pos())
+        act_file = menu.add_action(tr("Choose File…"))
+        act_folder = menu.add_action(tr("Choose Folder…"))
+        chosen = menu.exec(QCursor.pos())
         _open_dialog_and_append(parent, edit, folders=(chosen == act_folder), exts=exts)
         return
     _open_dialog_and_append(parent, edit, folders=(pick == 'folders'), exts=exts)
@@ -54,7 +55,7 @@ def _open_dialog_and_append(parent: QWidget, edit: QWidget, folders: bool, exts:
         if exts:
             dialog.setNameFilter('Supported (' + ' '.join(f'*{e}' for e in exts) + ')')
 
-    if not dialog.exec_():
+    if not dialog.exec():
         return
     paths = dialog.selectedFiles()
     if not paths:
@@ -168,6 +169,7 @@ class FieldLinker:
         self._relayouts = []
         self._relayout_callbacks = []
         self._wired = False
+        self._warned_refs = set()   # 已告警过的无效 when.field，避免重复刷日志
 
     def add_relayout(self, layout):
         """注册需要随显隐重排的布局（如流式多选区）"""
@@ -244,17 +246,32 @@ class FieldLinker:
         if not when:
             return True
         ref = when.get('field')
+        if ref not in self._rows:
+            # 依赖字段未登记（拼错 / 未声明 / 指向 inputs）：保持可见并记日志，
+            # 不让字段因取值条件恒不成立而被静默永久隐藏（TOML 保存时已拦截）
+            self._warn_unknown_ref(name, ref)
+            return True
         # 取值条件：如 {field=X, eq=V} / {field, in=[..]}
         if not condition_met(rule, self._read_ref(ref)):
             return False
-        if ref not in self._rows:
-            return True
         if _seen is None:
             _seen = set()
         if name in _seen:
             return True
         _seen.add(name)
         return self._parent_visible(ref, _seen)
+
+    def _warn_unknown_ref(self, name: str, ref: str):
+        """when.field 指向不存在的字段时告警一次（该字段会被当作始终可见）"""
+        key = f"{name}->{ref}"
+        if key in self._warned_refs:
+            return
+        self._warned_refs.add(key)
+        try:
+            from app.utils.log_manager import BM_LOG
+            BM_LOG.warning(f"[params_form] 参数 '{name}' 的 when.field='{ref}' 不存在，已忽略该联动条件")
+        except Exception:
+            pass
 
 
 def make_label_cell(name: str, label: str, required: bool) -> QWidget:
@@ -310,14 +327,14 @@ def build_param_widget(pd: Dict) -> QWidget:
         return w
 
     if ptype == 'list':
-        w = XTextEdit(placeholder='每行一条，回车分隔')
+        w = XTextEdit(placeholder=tr('One per line, press Enter to separate'))
         w.setMaximumHeight(80)
         if isinstance(default, list):
             w.setPlainText('\n'.join(str(x) for x in default))
         return w
 
     if ptype == 'dict':
-        w = XTextEdit(placeholder='JSON 格式，如 {"key": "value"}')
+        w = XTextEdit(placeholder=tr('JSON format, e.g. {"key": "value"}'))
         w.setMaximumHeight(80)
         if isinstance(default, dict):
             try:
@@ -342,8 +359,12 @@ def write_param_widget(w: QWidget, ptype: str, value: Any) -> None:
         w.setChecked(bool(value))
     elif isinstance(w, XComboBox):
         idx = w.findData(str(value))   # 按取值（userData）选中
+        if idx < 0:
+            idx = w.findText(str(value))   # 回退按显示名匹配
         if idx >= 0:
             w.setCurrentIndex(idx)
+        elif w.isEditable():
+            w.setEditText(str(value))      # 记忆值已不在 choices（脚本更新过）时也让用户看到
     elif isinstance(w, XDoubleSpinBox):
         try:
             w.setValue(float(value))
@@ -373,8 +394,15 @@ def read_param_widget(w: QWidget, ptype: str) -> Any:
     if isinstance(w, XCheckBox):
         return w.isChecked()
     if isinstance(w, XComboBox):
-        data = w.currentData()   # 优先取携带的取值；无 userData 则回退显示文本
-        return data if data is not None else w.currentText()
+        idx = w.currentIndex()
+        text = w.currentText().strip()
+        # 文本与选中项显示名一致 → 取该项携带的取值（无 userData 则回退显示名）；
+        # 否则是用户键入的自定义值 / 搜索过滤 / 已清空（可搜索下拉此时 index 可能仍停在旧项），
+        # 一律以界面上看到的文本为准，避免输入被静默吞掉
+        if idx >= 0 and text == w.itemText(idx):
+            data = w.itemData(idx)
+            return data if data is not None else (text or None)
+        return text or None
     if isinstance(w, XDoubleSpinBox):
         return w.value()
     if isinstance(w, XSpinBox):

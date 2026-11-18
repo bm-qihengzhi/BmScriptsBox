@@ -10,7 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
 
 
 class InstallationStatus(Enum):

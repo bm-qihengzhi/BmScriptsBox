@@ -7,8 +7,8 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import sys
 import json
 from xsideui import XDialog, XLabel, tr, XColor, XTextEdit, XPushButton, XButtonVariant
-from PySide2 import QtWidgets
-from PySide2.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout
+from PySide6 import QtWidgets
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout
 
 from app.data import ProjectGlobal
 from app.utils import BmTools, BmNotify
@@ -89,4 +89,4 @@ if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     proxy = ProxyWidget()
     proxy.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

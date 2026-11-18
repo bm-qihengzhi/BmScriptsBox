@@ -15,7 +15,7 @@ import time
 import ctypes
 from pathlib import Path
 from typing import List
-from PySide2.QtNetwork import QLocalSocket
+from PySide6.QtNetwork import QLocalSocket
 from xsideui import XI18N
 
 from app.data import ProjectGlobal
@@ -86,7 +86,7 @@ class BmTools:
     @staticmethod
     def is_chinese_env() -> bool:
         """判断运行环境是否为中文"""
-        lang, _ = locale.getdefaultlocale()
+        lang, _ = locale.getlocale()
         if lang and lang.startswith('zh'):
             return True
         return False
@@ -183,9 +183,9 @@ class BmTools:
 
     @staticmethod
     def remove_dir(path: Path, max_retries: int = 3) -> bool:
-        """
-        带只读文件处理和重试的目录删除，兼容 Python 3.8+
-        内部依次尝试：onerror 修复权限 → \\?\ 长路径绕过 → 重试 → 重启删除/待删队列
+        r"""
+        带只读文件处理和重试的目录删除，兼容 Python 3.12+
+        内部依次尝试：onexc 修复权限 → \\?\ 长路径绕过 → 重试 → 重启删除/待删队列
 
         Args:
             path: 要删除的目录
@@ -197,7 +197,7 @@ class BmTools:
         if not path.exists():
             return True
 
-        def _on_rm_error(func, p, exc_info):
+        def _on_rm_error(func, p, exc):
             os.chmod(p, stat.S_IWRITE)
             func(p)
 
@@ -226,7 +226,7 @@ class BmTools:
         def _try_once(use_long_path=False):
             if use_long_path:
                 return _long_rmtree(path)
-            shutil.rmtree(path, onerror=_on_rm_error)
+            shutil.rmtree(path, onexc=_on_rm_error)
             return not path.exists()
 
         # 首次尝试（onerror 修复只读）

@@ -6,13 +6,13 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import sys
 
-from PySide2.QtCore import QTimer, QSize
-from PySide2.QtGui import Qt, QIcon
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QTableWidgetItem, QApplication, QHBoxLayout
+from PySide6.QtCore import QTimer, QSize
+from PySide6.QtGui import Qt, QIcon
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidgetItem, QApplication, QHBoxLayout
 
 from typing import Optional
 from xsideui import XTableWidget, XSwitch, XComboBox, XMenu, XLabel, XPushButtonDropdown, \
-    XSize, IconName, XButtonVariant, XColor, XIcon, XNotif, XDivider, tr
+    XSize, IconName, XButtonVariant, XColor, XIcon, XNotif, XDivider, tr, XCard, XI18N
 from .context_pr import MenuPresenter
 
 
@@ -37,15 +37,8 @@ class ContextWidget(QWidget):
         self.main_layout.setContentsMargins(11, 11, 11, 11)
         self.main_layout.setSpacing(11)
 
-        title = XLabel(tr('Context Menu Manager'), style=XLabel.Style.H4).set_font_size(18)
-        desc = XLabel(
-            tr('Quick launch via right-click menu, auto-pass selected file path to script. If "Script Box" missing after install, uninstall then re-register menu.'),word_wrap=True)
-        desc.set_font_size(13).set_color(XColor.TERTIARY)
-        self.main_layout.addWidget(title)
-        self.main_layout.addWidget(desc)
-        self.main_layout.addWidget(XDivider())
-
-        operation_layout = QHBoxLayout()
+        title_layout = QHBoxLayout()
+        title = XLabel(tr('Context Menu Manager'), style=XLabel.Style.H3)
         self.search_combox = XComboBox(size=XSize.SMALL)
         self.search_combox.addItems([tr("File Menu"), tr("Folder Menu"), tr('Background Menu')])
         self.search_combox.currentIndexChanged.connect(self.presenter.on_search_type_changed)
@@ -55,29 +48,31 @@ class ContextWidget(QWidget):
             variant=XButtonVariant.FILLED,
             size=XSize.SMALL,
             icon=IconName.LIST,
+            # XPushButtonDropdown 用原生 QMenu.addAction，不走 xsideui 的自动查表，
+            # 菜单项必须显式 x_tr，否则 tr() 只是一句标记、运行时原样显示英文
             menu_items=[
-                {"text": tr("注册菜单"), "value": "register"},
-                {"text": tr("卸载菜单"), "value": "uninstall"},
-                {"text": tr("菜单切换"), "value": "Switch"},
+                {"text": XI18N.x_tr("Register menu"), "value": "register"},
+                {"text": XI18N.x_tr("Unregister menu"), "value": "uninstall"},
+                {"text": XI18N.x_tr("Switch menu style"), "value": "Switch"},
             ],
         )
         self.more_btn.menuTriggered.connect(self.presenter.on_menu_action_triggered)
 
-        operation_layout.addWidget(XLabel(tr("Filter：")).set_color(XColor.TERTIARY))
-        operation_layout.addWidget(self.search_combox)
-        operation_layout.addSpacing(10)
-        operation_layout.addWidget(self.more_btn)
-        operation_layout.addStretch()
-        self.main_layout.addLayout(operation_layout)
+        title_layout.addWidget(title,1)
+        title_layout.addWidget(self.search_combox,0)
+        title_layout.addWidget(self.more_btn,0)
+        self.main_layout.addLayout(title_layout)
 
-        self.table_widget = XTableWidget(row_height=48)
+        self.table_widget = XTableWidget(style=XTableWidget.Style.DEFAULT, select_mode="row", hover_mode="row")
         self.table_widget.setIconSize(QSize(24, 24))
         self.table_widget.set_headers([tr("Name"), tr('Parent'), tr('Level'), tr('Status')])
         self.table_widget.set_column_widths([-1, 120, 100, 60])
         self.table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_widget.customContextMenuRequested.connect(self._on_context_menu_requested)
 
-        self.main_layout.addWidget(self.table_widget)
+        table_card = XCard()
+        table_card.addWidget(self.table_widget)
+        self.main_layout.addWidget(table_card)
 
     def _init_presenter_signals(self):
         self.presenter.data_loaded.connect(self._on_data_loaded)
@@ -177,7 +172,7 @@ class ContextWidget(QWidget):
                 triggered=lambda: self.presenter.on_change_level(script_id, 1)
             )
 
-        menu.exec_(self.table_widget.viewport().mapToGlobal(pos))
+        menu.exec(self.table_widget.viewport().mapToGlobal(pos))
 
     def _on_action_completed(self, action: str, success: bool, direction: str):
         if success and action == "move":
@@ -210,4 +205,4 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     view = ContextWidget()
     view.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

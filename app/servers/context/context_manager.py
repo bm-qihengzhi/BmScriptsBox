@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.data.toml_schemas import ContextMenuConfig
-from app.utils import BmTools, BM_LOG
+from app.utils import BmError, BmTools, BM_LOG
 
 # 容器父项名称（一级菜单）
 _CONTAINER_NAME = "不忙脚本盒子"
@@ -124,11 +124,11 @@ class ContextManager:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if not isinstance(data, dict) or not isinstance(data.get("menuItems"), list):
-                    raise ValueError("菜单配置结构非法（缺少 menuItems 列表）")
+                    raise BmError('menu.config.invalid')
                 return data
             except Exception as e:
                 if strict:
-                    raise RuntimeError(f"BmContext.json 已损坏，已阻止写入以防覆盖: {e}")
+                    raise BmError('menu.config.corrupted') from e
                 BM_LOG.critical(f"加载菜单配置失败（返回空配置，未覆盖文件）: {e}")
                 return {"menuItems": []}
 
@@ -159,7 +159,7 @@ class ContextManager:
                 except PermissionError as e:  # 可能被 DLL 短暂占用
                     last_err = e
                     time.sleep(0.1 * (attempt + 1))
-            raise last_err if last_err else OSError("写入配置失败")
+            raise last_err if last_err else BmError('menu.config.write_failed')
         finally:
             if os.path.exists(tmp_path):
                 try:
@@ -279,7 +279,7 @@ class ContextManager:
 
                 return self.save_config(config)
             except Exception as e:
-                raise Exception(f"同步右键菜单失败: {str(e)}")
+                raise BmError('menu.sync.failed') from e
 
     def remove_script_menu(self, script_id: str) -> bool:
         """删除脚本菜单项（所有 target/层级）"""
@@ -289,7 +289,7 @@ class ContextManager:
                 self._remove_everywhere(config, script_id)
                 return self.save_config(config)
             except Exception as e:
-                raise Exception(f"删除脚本菜单失败:{e}")
+                raise BmError('menu.remove.failed') from e
 
     def modify_menu_status(self, script_id: str, status: bool,
                            target: Optional[str] = None) -> bool:
@@ -299,7 +299,7 @@ class ContextManager:
             try:
                 config = self.load_config(strict=True)
             except Exception as e:
-                raise ValueError(f"修改菜单状态失败: {e}")
+                raise BmError('menu.status.update_failed') from e
 
             candidates = []
             for menu in config.get("menuItems", []):
@@ -312,13 +312,13 @@ class ContextManager:
                         candidates.append(sub)
 
             if not candidates:
-                raise ValueError(f"未找到脚本菜单项: {script_id}")
+                raise BmError('menu.item.missing', script_id=script_id)
 
             for item in candidates:
                 item["state"] = status
 
             if not self.save_config(config):
-                raise ValueError("修改菜单状态失败: 保存配置失败")
+                raise BmError('menu.status.save_failed')
             return True
 
     def move_menu_item(self, script_id: str, direction: str, target: str) -> str:
@@ -435,7 +435,7 @@ class ContextManager:
                 (r for r in refs if r["item"].get("scriptId") == script_id),
                 None)
             if ref is None:
-                raise ValueError(f"未找到菜单项: {script_id}")
+                raise BmError('menu.item.missing', script_id=script_id)
 
             item = ref["item"]
 

@@ -7,12 +7,13 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 
 from typing import Dict, Optional
 
-from PySide2.QtCore import QTimer, Qt, QSize
-from PySide2.QtGui import QIcon, QColor
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QDialog
+from PySide6.QtCore import QTimer, Qt, QSize
+from PySide6.QtGui import QIcon, QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QDialog
 
 from xsideui import XTableWidget, XPushButton, XLabel, XSwitch, XMenu, \
-    XIcon, IconName, XButtonVariant, XColor, XSize, XDivider, tr, XI18N, XDialog
+    XIcon, IconName, XButtonVariant, XColor, XSize, XDivider, tr, XI18N, XDialog, XCard, \
+    theme_manager
 
 from app.utils import BM_LOG, BmNotify
 from .scheduled_pr import ScheduledPresenter
@@ -37,6 +38,7 @@ class ScheduledWidget(QWidget):
 
         self._setup_ui()
         self._connect_signals()
+        theme_manager.theme_changed.connect(self._refresh_status_colors)
         QTimer.singleShot(100, self.lazy_load_ui)
         self.presenter = ScheduledPresenter(self)
 
@@ -46,13 +48,7 @@ class ScheduledWidget(QWidget):
         layout.setSpacing(11)
         layout.setContentsMargins(11, 11, 11, 11)
         title_layout = QHBoxLayout()
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        title = XLabel(tr('Task Scheduler'), style=XLabel.Style.H4).set_font_size(18)
-        desc = XLabel(tr('Automation execution policies can be set for scripts, supporting various strategies such as loop, interval, daily, and weekly.'),word_wrap=True)
-        desc.set_font_size(13).set_color(XColor.TERTIARY)
-        title_layout.addWidget(title)
         layout.addLayout(title_layout)
-        layout.addWidget(desc)
 
         self.add_btn = XPushButton(
             text=tr("New Task"),
@@ -60,11 +56,11 @@ class ScheduledWidget(QWidget):
             variant=XButtonVariant.FILLED,
             size=XSize.SMALL,
         )
-        title_layout.addStretch()
-        title_layout.addWidget(self.add_btn)
-        layout.addWidget(XDivider())
+        title_layout.addWidget(XLabel(tr('Task Scheduler'), style=XLabel.Style.H3),1)
+        title_layout.addWidget(self.add_btn,0)
 
-        self.task_list = XTableWidget(row_height=48)
+        task_card = XCard()
+        self.task_list = XTableWidget(style=XTableWidget.Style.DEFAULT, select_mode="row", hover_mode="row")
         self.task_list.setIconSize(QSize(24, 24))
         self.task_list.set_headers([tr("Name"), tr("Schedule Details"), tr("Status"), tr("Last Run")])
         self.task_list.set_column_widths([150, -1, 90, 130])
@@ -72,8 +68,8 @@ class ScheduledWidget(QWidget):
         # 启用右键菜单
         self.task_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.task_list.customContextMenuRequested.connect(self._show_context_menu)
-
-        layout.addWidget(self.task_list)
+        task_card.addWidget(self.task_list)
+        layout.addWidget(task_card)
 
     def _connect_signals(self):
         """连接信号"""
@@ -95,7 +91,7 @@ class ScheduledWidget(QWidget):
                 self.setup_window.update_task_data(task_data)
             else:
                 self.setup_window.update_task_name()
-            self.setup_window.exec_()
+            self.setup_window.exec()
         except Exception as e:
             BM_LOG.error(e)
             BmNotify().show_error_notify(tr('Failed to open schedule configuration'), in_window=True)
@@ -117,7 +113,7 @@ class ScheduledWidget(QWidget):
             item_2 = QTableWidgetItem(self.timing_description(task_type=data['task_type'], data=data))
             if data.get('wechat_push'):
                 # 哪些任务跑完会推微信，在列表一眼可见
-                item_2.setText(item_2.text() + ' · 推送微信')
+                item_2.setText(item_2.text() + ' · ' + XI18N.x_tr('WeChat push'))
             self.task_list.setItem(row, 1, item_2)
             self._setup_status_switch(row, data)
             self._setup_last_run_cell(row, data['task_id'])
@@ -126,7 +122,7 @@ class ScheduledWidget(QWidget):
         """第 4 列：最近一次执行状态 + 时间"""
         run = self.presenter.get_latest_task_run(task_id)
         if not run:
-            item = QTableWidgetItem(tr("Never"))
+            item = QTableWidgetItem(XI18N.x_tr("Never"))
             self.task_list.setItem(row, 3, item)
             return
         from datetime import datetime
@@ -136,16 +132,32 @@ class ScheduledWidget(QWidget):
         except Exception:
             pass
         label = ({
-            'success': f"成功 {time_str}",
-            'failed': f"失败 {time_str}",
-            'completed': f"已执行 {time_str}",
+            'success': XI18N.x_tr("Success") + " " + time_str,
+            'failed': XI18N.x_tr("Failed") + " " + time_str,
+            'completed': XI18N.x_tr("Completed") + " " + time_str,
         }).get(run['status'], f"{run['status']} {time_str}")
         item = QTableWidgetItem(label)
-        if run['status'] == 'failed':
-            item.setForeground(QColor(220, 80, 80))
-        elif run['status'] == 'success':
-            item.setForeground(QColor(70, 150, 90))
+        item.setData(Qt.UserRole, run['status'])
+        self._apply_status_color(item, run['status'])
         self.task_list.setItem(row, 3, item)
+
+    @staticmethod
+    def _status_color(status):
+        family = {'failed': 'error', 'success': 'success'}.get(status)
+        if not family:
+            return None
+        return QColor(theme_manager.palette_color(family, 6, '#909399'))
+
+    def _apply_status_color(self, item, status):
+        color = self._status_color(status)
+        if color is not None:
+            item.setForeground(color)
+
+    def _refresh_status_colors(self, *args):
+        for row in range(self.task_list.rowCount()):
+            item = self.task_list.item(row, 3)
+            if item is not None:
+                self._apply_status_color(item, item.data(Qt.UserRole))
 
     @staticmethod
     def _fmt_seconds(seconds) -> str:
@@ -154,34 +166,46 @@ class ScheduledWidget(QWidget):
             return '0'
         seconds = int(seconds)
         if seconds >= 60 and seconds % 60 == 0:
-            return f"{seconds // 60}分钟"
+            return XI18N.x_tr("%1 min").replace("%1", str(seconds // 60))
         if seconds >= 60:
-            return f"{seconds // 60}分{seconds % 60}秒"
-        return f"{seconds}秒"
+            return (XI18N.x_tr("%1 min %2 s").replace("%1", str(seconds // 60))
+                    .replace("%2", str(seconds % 60)))
+        return XI18N.x_tr("%1 s").replace("%1", str(seconds))
 
     def timing_description(self, task_type, data):
         description = tr("Unknown")
         # 兼容早期版本误存的中文 task_type
         task_type = _TASK_TYPE_CODE.get(task_type, task_type)
         if task_type == "fixed_interval":
-            description = f"间隔:{self._fmt_seconds(data.get('interval_seconds'))}"
+            description = XI18N.x_tr("Every %1").replace(
+                "%1", self._fmt_seconds(data.get("interval_seconds")))
             jitter = data.get('jitter_seconds') or 0
             if jitter:
                 description += f" ± {self._fmt_seconds(jitter)}"
             if data.get('max_run_count'):
-                description += f"（{data.get('executed_count', 0)}/{data['max_run_count']}次）"
+                description += XI18N.x_tr("(%1/%2 runs)").replace(
+                    "%1", str(data.get("executed_count", 0))
+                ).replace("%2", str(data["max_run_count"]))
         elif task_type == "random_interval":
-            description = f"随机间隔:{self._fmt_seconds(data.get('min_interval_seconds'))}-{self._fmt_seconds(data.get('max_interval_seconds'))}"
+            description = XI18N.x_tr("Random every %1-%2").replace(
+                "%1", self._fmt_seconds(data.get("min_interval_seconds"))
+            ).replace("%2", self._fmt_seconds(data.get("max_interval_seconds")))
             if data.get('max_run_count'):
-                description += f"（{data.get('executed_count', 0)}/{data['max_run_count']}次）"
+                description += XI18N.x_tr("(%1/%2 runs)").replace(
+                    "%1", str(data.get("executed_count", 0))
+                ).replace("%2", str(data["max_run_count"]))
         elif task_type == "countdown":
-            description = f"倒计时:{self._fmt_seconds(data.get('delay_seconds'))}"
+            description = XI18N.x_tr("Countdown %1").replace(
+                "%1", self._fmt_seconds(data.get("delay_seconds")))
         elif task_type == "daily":
-            description = f"每日:{str(data['daily_time'])}"
+            description = XI18N.x_tr("Daily %1").replace("%1", str(data["daily_time"]))
         elif task_type == "weekly":
-            description = f"每{data['weekly_weekday']}{data['weekly_time']}"
+            description = XI18N.x_tr("Every %1 %2").replace(
+                "%1", weekday_label(data["weekly_weekday"])).replace("%2", str(data["weekly_time"]))
         elif task_type == "monthly":
-            description = f"每月{data.get('monthly_day')}日 {data.get('monthly_time')}"
+            description = XI18N.x_tr("Monthly day %1, %2").replace(
+                "%1", str(data.get("monthly_day"))
+            ).replace("%2", str(data.get("monthly_time")))
         return description
 
     def _setup_status_switch(self, row, data):
@@ -240,7 +264,7 @@ class ScheduledWidget(QWidget):
         )
 
         # 显示菜单
-        menu.exec_(self.task_list.viewport().mapToGlobal(pos))
+        menu.exec(self.task_list.viewport().mapToGlobal(pos))
 
     def _open_run_history(self, task_id, task_name):
         """打开某任务的执行历史对话框"""
@@ -248,8 +272,8 @@ class ScheduledWidget(QWidget):
             from datetime import datetime
             runs = self.presenter.get_task_runs(task_id)
             dialog = XDialog(self.window())
-            dialog.set_title(f"{task_name} -定时执行记录")
-            dialog.resize(560, 420)
+            dialog.set_title(XI18N.x_tr("%1 - Run history").replace("%1", task_name))
+            dialog.resize_content(560, 420)
             history_widget = QWidget()
             dialog.addWidget(history_widget)
             lay = QVBoxLayout(history_widget)
@@ -264,14 +288,17 @@ class ScheduledWidget(QWidget):
                     except Exception:
                         t = r.get('run_at') or ''
                     table.setItem(row, 0, QTableWidgetItem(t))
-                    status_text = {'success': '成功', 'failed': '失败', 'completed': '已执行'}.get(r.get('status'), r.get('status'))
+                    status_text = {'success': XI18N.x_tr('Success'),
+                                   'failed': XI18N.x_tr('Failed'),
+                                   'completed': XI18N.x_tr('Completed')}.get(
+                        r.get('status'), r.get('status'))
                     table.setItem(row, 1, QTableWidgetItem(status_text))
                     table.setItem(row, 2, QTableWidgetItem(str(r.get('msg') or '')))
             lay.addWidget(table)
             btn = XPushButton(text=tr('Close'))
             btn.clicked.connect(dialog.accept)
             lay.addWidget(btn, alignment=Qt.AlignRight)
-            dialog.exec_()
+            dialog.exec()
         except Exception as e:
             BM_LOG.error(f"打开执行历史失败: {e}")
             BmNotify().show_error_notify(tr('Failed to open run history'), in_window=True)

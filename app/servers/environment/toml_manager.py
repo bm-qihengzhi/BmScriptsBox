@@ -5,11 +5,12 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
-import toml
+import tomllib
 import zipfile
 from pathlib import Path
 
 from app.data.toml_schemas import ScriptTomlConfig, ScriptLoadResult
+from app.utils import BmError
 from pydantic import ValidationError
 
 
@@ -23,7 +24,7 @@ class TomlManager:
         script_path = Path(script_dir)
         package_file = script_path / 'package.json'
         if not package_file.exists():
-            raise FileNotFoundError("该JS脚本根目录下未包含必要的package.json文件")
+            raise BmError('install.config.missing_manifest', file='package.json')
         try:
             with open(package_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -35,9 +36,9 @@ class TomlManager:
         """读取zip根目录下的package.json,适用于javascript脚本"""
         zip_path = Path(zip_path)
         if not zip_path.exists():
-            raise FileNotFoundError(f"Zip文件不存在: {zip_path}")
+            raise BmError('install.package.not_found', path=str(zip_path))
         if zip_path.suffix != '.zip':
-            raise ValueError(f"文件不是ZIP格式: {zip_path}")
+            raise BmError('install.package.not_zip', path=str(zip_path))
 
         try:
             with zipfile.ZipFile(zip_path, 'r') as zf:
@@ -54,14 +55,11 @@ class TomlManager:
                         if f.lower() == "package.json" and '/' not in f
                     ]
                     if not package_files:
-                        raise FileNotFoundError(
-                            "ZIP中未找到根目录下的package.json文件。"
-                            "注意：仅支持根目录文件，不支持子目录"
-                        )
+                        raise BmError('install.config.missing_package_json')
 
                 if len(package_files) > 1:
                     # 安全机制：理论上不可能，但防御性编程
-                    raise ValueError(f"ZIP中存在多个根目录package.json: {package_files}")
+                    raise BmError('install.config.multiple_package_json')
 
                 package_file = package_files[0]
                 content = zf.read(package_file).decode('utf-8-sig')  # 处理BOM
@@ -69,15 +67,16 @@ class TomlManager:
                 try:
                     return json.loads(content)  # 正确解析为Python字典
                 except json.JSONDecodeError as e:
-                    raise ValueError(
-                        f"无效的JSON格式 in {package_file}: {str(e)}\n"
-                        f"文件内容预览: {content[:100]}..."
-                    )
+                    raise BmError('install.config.invalid_json',
+                                      file=package_file) from e
 
         except zipfile.BadZipFile as e:
-            raise ValueError(f"无效的ZIP文件: {str(e)}")
+            raise BmError('install.package.corrupt_zip', path=str(zip_path)) from e
+        except BmError:
+            raise
         except Exception as e:
-            raise Exception(f"读取ZIP时出错: {str(e)}") from e
+            raise BmError('install.package.corrupt_zip',
+                          path=str(zip_path)) from e
 
 
 
@@ -86,19 +85,19 @@ class TomlManager:
         try:
             pyproject_file = Path(script_dir) / 'pyproject.toml'
             if not pyproject_file.exists():
-                raise FileNotFoundError("目录中不存在pyproject.toml文件")
-            with open(pyproject_file, 'r', encoding='utf-8') as f:
-                data = toml.load(f)
+                raise BmError('install.config.missing_manifest', file='pyproject.toml')
+            with open(pyproject_file, 'rb') as f:
+                data = tomllib.load(f)
             return data
         except Exception as e:
-            raise RuntimeError(f'读取 pyproject.toml 文件错误: {e}')
+            raise BmError('install.config.read_failed') from e
 
     def read_toml_id_from_zip(self, zip_path):
         """从压缩包的bm-scripts-box-rc.toml中读取脚本ID"""
         with zipfile.ZipFile(zip_path, 'r') as zf:
             toml_file = self._pick_toml_from_zip(zf.namelist())
             toml_content = zf.read(toml_file).decode('utf-8')
-            data = toml.loads(toml_content)
+            data = tomllib.loads(toml_content)
             return data['bmscriptsbox']['info']['id']
 
     TOML_FILENAME = 'bm-scripts-box-rc.toml'
@@ -109,13 +108,12 @@ class TomlManager:
         matches = [n for n in names
                    if n.endswith(cls.TOML_FILENAME) and not n.endswith('/')]
         if not matches:
-            raise FileNotFoundError("脚本压缩包内无配置文件bm-scripts-box-rc.toml")
+            raise BmError('install.config.missing')
         matches.sort(key=lambda n: (n.count('/'), len(n)))
         top_depth = matches[0].count('/')
         same_depth = [n for n in matches if n.count('/') == top_depth]
         if len(same_depth) > 1:
-            raise ValueError(
-                f"压缩包内存在多个 {cls.TOML_FILENAME}，无法确定配置文件: {same_depth[:5]}")
+            raise BmError('install.config.multiple', file=cls.TOML_FILENAME)
         return matches[0]
 
     def find_toml_file(self, script_dir):
@@ -123,15 +121,13 @@ class TomlManager:
         script_path = Path(script_dir)
         files = list(script_path.rglob(self.TOML_FILENAME))
         if not files:
-            raise FileNotFoundError(f"目录下找不到 {self.TOML_FILENAME} 配置文件")
+            raise BmError('install.config.missing')
         files.sort(key=lambda p: (len(p.relative_to(script_path).parts), str(p)))
         top_depth = len(files[0].relative_to(script_path).parts)
         same_depth = [p for p in files
                       if len(p.relative_to(script_path).parts) == top_depth]
         if len(same_depth) > 1:
-            raise ValueError(
-                f"目录下存在多个 {self.TOML_FILENAME}，无法确定配置文件: "
-                f"{[str(p) for p in same_depth[:5]]}")
+            raise BmError('install.config.multiple', file=self.TOML_FILENAME)
         return files[0]
 
 
@@ -143,8 +139,8 @@ class TomlManager:
                 toml_file = self.find_toml_file(script_path)
             except (FileNotFoundError, ValueError) as e:
                 return ScriptLoadResult(success=False, error_messages=[str(e)])
-            with open(toml_file, 'r', encoding='utf-8') as f:
-                data = toml.load(f)
+            with open(toml_file, 'rb') as f:
+                data = tomllib.load(f)
 
         except Exception as e:
             return ScriptLoadResult(success=False, error_messages=[f"文件读取失败: {str(e)}"])
@@ -197,7 +193,8 @@ class TomlManager:
                 loc_path = " -> ".join([LOC_MAP.get(str(l), str(l)) for l in error['loc']])
                 #  语义化错误原因
                 err_type = error['type']
-                err_msg = error['msg']  # 默认保留 Pydantic 的原始消息作为保底
+                # 默认保留 Pydantic 的原始消息作为保底；BmError 会带 "Value error, " 前缀
+                err_msg = error['msg'].removeprefix("Value error, ")
 
                 if err_type == "uuid_parsing":
                     err_msg = "不是有效的 UUID 格式 (标准格式如: xxxxxxxx-xxxx-...)"
@@ -215,8 +212,11 @@ class TomlManager:
                 # C. 获取输入值
                 input_val = error.get('input', '无')
 
-                # 组装成最终的语义化消息
-                detail = f"❌ 【{loc_path}】: {err_msg} (当前值: '{input_val}')"
+                # 组装成最终的语义化消息；业务错误码文案已完整，不再拼字段路径与当前值
+                if err_type == "value_error":
+                    detail = f"❌ {err_msg}"
+                else:
+                    detail = f"❌ 【{loc_path}】: {err_msg} (当前值: '{input_val}')"
                 semantic_errors.append(detail)
 
             return ScriptLoadResult(success=False, error_messages=semantic_errors)

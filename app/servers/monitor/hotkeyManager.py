@@ -7,8 +7,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 
 import threading
 
-from app.data import ScriptDatabase
-from PySide2.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 
 from app.utils import BM_LOG
 
@@ -26,6 +25,7 @@ class HotkeyManager(QObject):
         if not hasattr(self, '_initialized'):
             super().__init__(parent)
             self._initialized = True
+            from app.data import ScriptDatabase
             self.db = ScriptDatabase()
             self.scripts = []
             self._hotkey_hooks = []

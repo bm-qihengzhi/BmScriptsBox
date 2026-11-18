@@ -5,7 +5,7 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import json
-from PySide2.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal
 from app.data import ProjectGlobal
 from app.utils import BmTools
 

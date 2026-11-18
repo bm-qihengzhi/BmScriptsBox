@@ -9,20 +9,21 @@ import json
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
-from PySide2.QtCore import Qt, Signal, QTime, QTimer
-from PySide2.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QTime, QTimer
+from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QFormLayout,
     QButtonGroup, QStackedWidget
 )
 from xsideui import (
     XSpinBox, XPushButton, XLabel, XComboBox, XTimeEdit,
     XTextEdit, XButtonVariant, XColor, XDialog, XRadioButton,
-    XCheckBox, XDoubleSpinBox, XLineEdit, XScrollArea, tr, XSize, XSwitch
+    XCheckBox, XDoubleSpinBox, XLineEdit, XScrollArea, tr, XSize, XSwitch,
+    XMessageBox, XI18N
 )
 from xsideui.widgets.divider import XTextDivider, XDivider
 from app.data import ProjectGlobal, ScriptDatabase, TaskDatabase
 from app.utils.tools import BmTools
-from .scheduled_mode import TimeMode, WeekMode
+from .scheduled_mode import TimeMode, WeekMode, weekday_label
 from app.view.params_ui import build_param_widget as _shared_build_param_widget, \
     read_param_widget as _shared_read_param_widget, make_label_cell, make_header_row, \
     browse_append_to_edit, field_signal as _shared_field_signal, FieldLinker
@@ -95,7 +96,7 @@ class ScheduledSetWidget(XDialog):
         self.set_title(tr('Scheduled Scripts'))
         self.set_logo(BmTools.get_logo_path())
         self.hide_maximize_button()
-        self.resize(800, 560)
+        self.resize_content(800, 560)
 
         widget = QWidget()
         layout = QHBoxLayout(widget)
@@ -111,6 +112,7 @@ class ScheduledSetWidget(XDialog):
         # ── 脚本 ──
         script_divider = XTextDivider(tr('Script Name'), align=Qt.AlignLeft)
         self.task_name = XComboBox(searchable=True)
+        self.task_name.lineEdit().setPlaceholderText(XI18N.x_tr("Search script..."))
         self.left_layout.addWidget(script_divider)
         self.left_layout.addWidget(self.task_name)
 
@@ -143,13 +145,13 @@ class ScheduledSetWidget(XDialog):
         # 固定间隔（可带 ± 秒扰动）
         self._fixed_radio = XRadioButton(tr("Fixed Interval"))
         self._time_group.addButton(self._fixed_radio, 0)
-        self.repeat_second = XSpinBox(suffix=" 秒")
+        self.repeat_second = XSpinBox(suffix=XI18N.x_tr(" s"))
         self.repeat_second.setRange(0, 99999)
         self.repeat_second.setFixedWidth(130)
-        self.jitter_second = XSpinBox(prefix='± 秒')
+        self.jitter_second = XSpinBox(prefix=XI18N.x_tr('± s'))
         self.jitter_second.setRange(0, 99999)
         self.jitter_second.setFixedWidth(130)
-        self.jitter_second.setToolTip("在固定间隔上叠加 ± 秒的随机扰动，0=纯固定")
+        self.jitter_second.setToolTip(XI18N.x_tr("Adds ± s random jitter on the fixed interval; 0 = fixed"))
         grid.addWidget(self._fixed_radio, row, 0)
         grid.addWidget(self.repeat_second, row, 1)
         grid.addWidget(self.jitter_second, row, 2)
@@ -158,7 +160,7 @@ class ScheduledSetWidget(XDialog):
         # 倒计时
         self._countdown_radio = XRadioButton(tr("Countdown"))
         self._time_group.addButton(self._countdown_radio, 1)
-        self.countdown_second = XSpinBox(suffix=" 秒")
+        self.countdown_second = XSpinBox(suffix=XI18N.x_tr(" s"))
         self.countdown_second.setRange(0, 99999)
         self.countdown_second.setFixedWidth(130)
         grid.addWidget(self._countdown_radio, row, 0)
@@ -178,7 +180,7 @@ class ScheduledSetWidget(XDialog):
         self._weekly_radio = XRadioButton(tr("Weekly"))
         self._time_group.addButton(self._weekly_radio, 3)
         self.week_combobox = XComboBox()
-        self.week_combobox.addItems([mode.value for mode in WeekMode])
+        self.week_combobox.addItems([weekday_label(mode.value) for mode in WeekMode])
         self.week_combobox.setFixedWidth(130)
         self.weekly_time = XTimeEdit()
         self.weekly_time.setFixedWidth(130)
@@ -190,10 +192,10 @@ class ScheduledSetWidget(XDialog):
         # 每月
         self._monthly_radio = XRadioButton(tr("Monthly"))
         self._time_group.addButton(self._monthly_radio, 4)
-        self.monthly_day = XSpinBox(prefix='每月', suffix=" 号")
+        self.monthly_day = XSpinBox(prefix=XI18N.x_tr('Day '), suffix="")
         self.monthly_day.setRange(1, 31)
         self.monthly_day.setValue(1)
-        self.monthly_day.setToolTip("29-31 号在较短月份回退到当月最后一天")
+        self.monthly_day.setToolTip(XI18N.x_tr("Days 29-31 fall back to the last day of shorter months"))
         self.monthly_day.setFixedWidth(130)
         self.monthly_time = XTimeEdit()
         self.monthly_time.setFixedWidth(130)
@@ -203,27 +205,27 @@ class ScheduledSetWidget(XDialog):
         row += 1
 
         # 最大间隔
-        interval = XTextDivider(tr('运行次数'), align=Qt.AlignLeft)
+        interval = XTextDivider(XI18N.x_tr('Run limit'), align=Qt.AlignLeft)
         grid.addWidget(interval, row, 0, 1, -1)
-        grid.addWidget(XLabel('最大次数：'), row+1, 0)
-        self.repeat_count = XSpinBox(suffix=" 次")
+        grid.addWidget(XLabel(tr('Max runs:')), row+1, 0)
+        self.repeat_count = XSpinBox(suffix=XI18N.x_tr(" times"))
         self.repeat_count.setRange(0, 9999)
-        self.repeat_count.setToolTip("执行次数上限，0=不限")
+        self.repeat_count.setToolTip(XI18N.x_tr("Max run count; 0 = unlimited"))
         self.repeat_count.setFixedWidth(130)
         grid.addWidget(self.repeat_count, row+1, 1)
-        grid.addWidget(XLabel('最大次数仅对固定间隔（含扰动）策略生效，0为不限制次数').set_color(XColor.TERTIARY).set_font_size(12), row+2, 0,1 ,-1)
+        grid.addWidget(XLabel(tr('Max runs applies to fixed interval (with jitter) only; 0 means unlimited')).set_color(XColor.TERTIARY).set_font_size(12), row+2, 0,1 ,-1)
 
         # 执行结果通知：推不推按任务勾选，收件人在设置-推送页扫码绑定
         if HAS_WECHAT_PUSH:
-            grid.addWidget(XTextDivider('执行结果通知', align=Qt.AlignLeft), row+3, 0, 1, -1)
-            grid.addWidget(XLabel('完成后推送微信：'), row+4, 0)
+            grid.addWidget(XTextDivider(XI18N.x_tr('Result notification'), align=Qt.AlignLeft), row+3, 0, 1, -1)
+            grid.addWidget(XLabel(tr('Push to WeChat when done:')), row+4, 0)
             self.wechat_push_switch = XSwitch(size=XSize.SMALL, text_on='', text_off='')
             grid.addWidget(self.wechat_push_switch, row+4, 1)
             self.wechat_bind_btn = XPushButton(
-                text='保存并去绑定', size=XSize.SMALL,
+                text=tr('Save and Bind'), size=XSize.SMALL,
                 variant=XButtonVariant.OUTLINED, color=XColor.TERTIARY)
             grid.addWidget(self.wechat_bind_btn, row+4, 2)
-            self.wechat_hint_label = XLabel('微信未连接：保存后去扫码绑定') \
+            self.wechat_hint_label = XLabel(tr('WeChat not connected: save, then scan to bind')) \
                 .set_color(XColor.TERTIARY).set_font_size(12)
             grid.addWidget(self.wechat_hint_label, row+5, 0, 1, -1)
 
@@ -390,11 +392,11 @@ class ScheduledSetWidget(XDialog):
     def _create_input_widget(self, ptype: str, exts: List[str]) -> Optional[XTextEdit]:
         """根据类型创建输入控件"""
         placeholder_map = {
-            'list': '请输入路径参数 一行一个',
-            'str': '请输入文本参数',
+            'list': XI18N.x_tr('One path per line'),
+            'str': XI18N.x_tr('Enter text'),
         }
 
-        placeholder = placeholder_map.get(ptype, '请输入参数')
+        placeholder = placeholder_map.get(ptype, XI18N.x_tr('Enter a value'))
         if exts:
             placeholder += f"（{' '.join(exts)}）"
 
@@ -767,8 +769,23 @@ class ScheduledSetWidget(XDialog):
 
     def on_ok_btn_clicked(self):
         """确认按钮点击事件"""
+        if not self._check_params_before_save():
+            return
         self._persist_task()
         self.close()
+
+    def _check_params_before_save(self) -> bool:
+        """保存前校验必填与 choices（与启动弹窗同一口径）；不通过返回 False"""
+        from app.utils.params_validate import validate_params
+        info = self.scripts_model.get(self.task_name.currentText()) if self.scripts_model else None
+        linker = getattr(self, '_params_linker', None)
+        schema = [pd for pd in ((info or {}).get('params_schema') or [])
+                  if linker is None or linker.is_visible(pd.get('name', ''))]
+        error = validate_params(schema, self._collect_params_overrides())
+        if error:
+            XMessageBox.information(self, tr('Parameter validation'), error)
+            return False
+        return True
 
     def _goto_wechat_bind(self):
         """本窗是模态，跳不了主窗，所以先保存再关窗，把用户送到推送页扫码绑定。"""

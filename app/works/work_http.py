@@ -5,7 +5,7 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import threading
-from PySide2.QtCore import QThread
+from PySide6.QtCore import QThread
 
 from app.servers.http_local import FlaskServer, FlaskSignals
 from app.utils import BM_LOG

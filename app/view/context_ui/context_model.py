@@ -8,6 +8,8 @@ import copy
 import os
 from typing import Dict, List
 
+from xsideui import tr
+
 from app.data import ProjectGlobal
 from app.servers.context import ContextManager
 from app.utils import BmTools
@@ -18,7 +20,7 @@ class ContextModel:
 
     def __init__(self):
         self.menu_manager = ContextManager()
-        self.level_map = {1: "一级菜单", 2: "二级菜单"}
+        self.level_map = {1: tr("Level 1 menu"), 2: tr("Level 2 menu")}
         self.index_map = {0: 'files', 1: 'directory', 2: 'background'}
 
     def load_menu_data(self) -> Dict:

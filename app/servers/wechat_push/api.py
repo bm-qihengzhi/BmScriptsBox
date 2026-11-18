@@ -11,13 +11,10 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import base64
 import json
 import re
-import secrets
 import time
 from urllib.parse import quote
 
-import requests
-
-from app.utils import BM_LOG
+from app.utils import BmError, BM_LOG
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
 CHANNEL_VERSION = "2.4.6"
@@ -44,9 +41,16 @@ _REDACT_JSON = re.compile(
 _REDACT_URL = re.compile(
     r'(?i)((?:' + '|'.join(_REDACT_KEYS) + r')=)([^&\s,"}]+)')
 
+# requests / secrets 延迟到首次调用时导入：模块级导入会把 requests 全链
+# （urllib3 / idna / charset_normalizer，~600ms）拖进应用启动关键路径，
+# 而微信推送只在设置页与推送动作里才真正用到。函数内的重复 import 走
+# sys.modules 缓存，开销可忽略。
+
 
 def redact(value):
     """把敏感字段值替换成 ***，用于日志。"""
+    if isinstance(value, ILinkError):
+        value = repr(value)
     text = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value or '')
     text = _REDACT_JSON.sub(r'\1***\3', text)
     text = _REDACT_URL.sub(r'\1***', text)
@@ -62,12 +66,16 @@ def summary(data):
     return ' '.join(parts)
 
 
-class ILinkError(Exception):
-    """iLink HTTP、JSON 或业务层错误。"""
+class ILinkError(BmError):
+    """iLink HTTP、JSON 或业务层错误。
 
-    def __init__(self, message, path='', status=None, ret=None, errcode=None,
-                 response=None, network_type=None):
-        super().__init__(message)
+    对外文案走错误码本地化；技术细节（detail / 状态码 / 业务码）只用于日志。
+    """
+
+    def __init__(self, code, detail='', path='', status=None, ret=None,
+                 errcode=None, response=None, network_type=None, **params):
+        super().__init__(code, **params)
+        self.detail = detail
         self.path = path
         self.status = status
         self.ret = ret
@@ -76,12 +84,17 @@ class ILinkError(Exception):
         self.network_type = network_type
 
     @property
-    def code(self):
+    def business_code(self):
         return self.ret if self.ret not in (None, 0) else self.errcode
 
     @property
     def is_stale_token(self):
-        return self.code == -14
+        return self.business_code == -14
+
+    def __repr__(self):
+        return ('%s(%r, path=%r, status=%r, business_code=%r, detail=%r)'
+                % (type(self).__name__, self.code, self.path, self.status,
+                   self.business_code, self.detail))
 
 
 def _common_headers():
@@ -92,6 +105,7 @@ def _common_headers():
 
 
 def _headers(token=None):
+    import secrets
     h = {
         'Content-Type': 'application/json',
         'AuthorizationType': 'ilink_bot_token',
@@ -108,6 +122,7 @@ def base_info():
 
 
 def _client_id():
+    import secrets
     return 'openclaw-weixin:%d-%s' % (int(time.time() * 1000), secrets.token_hex(4))
 
 
@@ -119,9 +134,13 @@ def _parse_json(text, path, status):
     try:
         data = json.loads(text)
     except (TypeError, ValueError) as exc:
-        raise ILinkError('%s 返回非 JSON: %s' % (path, exc), path=path, status=status)
+        raise ILinkError('wechat.api.bad_response',
+                        detail='%s non-JSON: %s' % (path, exc),
+                        path=path, status=status)
     if not isinstance(data, dict):
-        raise ILinkError('%s 返回类型错误: %s' % (path, type(data).__name__), path=path, status=status)
+        raise ILinkError('wechat.api.bad_response',
+                        detail='%s unexpected type: %s' % (path, type(data).__name__),
+                        path=path, status=status)
     return data
 
 
@@ -133,7 +152,9 @@ def ensure_business_success(data, path):
         BM_LOG.warning('[微信推送][业务] %s 失败 ret=%r errcode=%r errmsg=%r'
                        % (path, ret, errcode, data.get('errmsg')))
         raise ILinkError(
-            '%s ret=%r errcode=%r: %s' % (path, ret, errcode, data.get('errmsg') or 'iLink 业务请求失败'),
+            'wechat.api.error',
+            detail='%s ret=%r errcode=%r: %s' % (
+                path, ret, errcode, data.get('errmsg') or 'iLink business error'),
             path=path, ret=ret, errcode=errcode, response=data)
     return data
 
@@ -142,12 +163,14 @@ def _raise_for_status(data, method, path, status):
     if 200 <= status < 300:
         return
     raise ILinkError(
-        '%s %s HTTP %s: %s' % (method, path, status, data.get('errmsg', '')),
+        'wechat.api.http_error', http=status,
+        detail='%s %s HTTP %s: %s' % (method, path, status, data.get('errmsg', '')),
         path=path, status=status, ret=data.get('ret'), errcode=data.get('errcode'), response=data)
 
 
 def _post(path, body, token=None, base_url=None, timeout=API_TIMEOUT, long_poll=False,
           fallback_cursor=''):
+    import requests
     safe_path = redact(path)
     BM_LOG.info('[微信推送][HTTP] -> POST %s (登录态=%s, 超时=%s)'
                 % (safe_path, '有' if token else '无', timeout))
@@ -158,10 +181,12 @@ def _post(path, body, token=None, base_url=None, timeout=API_TIMEOUT, long_poll=
             BM_LOG.info('[微信推送][HTTP] <- POST %s 长轮询超时，按空轮处理' % safe_path)
             return {'ret': 0, 'msgs': [], 'get_updates_buf': fallback_cursor, '_timeout': True}
         BM_LOG.warning('[微信推送][HTTP] !! POST %s 超时' % safe_path)
-        raise ILinkError('POST %s 超时' % path, path=path, network_type='timeout')
+        raise ILinkError('wechat.net.timeout', detail='POST %s timeout' % path,
+                        path=path, network_type='timeout')
     except (requests.RequestException, OSError) as exc:
         BM_LOG.warning('[微信推送][HTTP] !! POST %s 网络错误: %s' % (safe_path, exc))
-        raise ILinkError('POST %s 网络错误: %s' % (path, exc), path=path, network_type='network')
+        raise ILinkError('wechat.net.error', detail='POST %s: %s' % (path, exc),
+                        path=path, network_type='network')
     data = _parse_json(resp.text, path, resp.status_code)
     BM_LOG.info('[微信推送][HTTP] <- POST %s HTTP %s %s' % (safe_path, resp.status_code, summary(data)))
     BM_LOG.debug('[微信推送][HTTP]    POST %s 响应体=%s' % (safe_path, redact(data)))
@@ -171,6 +196,7 @@ def _post(path, body, token=None, base_url=None, timeout=API_TIMEOUT, long_poll=
 
 def _get(path, token=None, base_url=None, timeout=QR_STATUS_TIMEOUT, long_poll=False):
     # 2.4.6 二维码状态 GET 仅带公共应用头，不带 Bearer
+    import requests
     safe_path = redact(path)
     BM_LOG.info('[微信推送][HTTP] -> GET %s (超时=%s)' % (safe_path, timeout))
     try:
@@ -180,10 +206,12 @@ def _get(path, token=None, base_url=None, timeout=QR_STATUS_TIMEOUT, long_poll=F
             BM_LOG.info('[微信推送][HTTP] <- GET %s 长轮询超时，按 wait 处理' % safe_path)
             return {'status': 'wait', '_timeout': True}
         BM_LOG.warning('[微信推送][HTTP] !! GET %s 超时' % safe_path)
-        raise ILinkError('GET %s 超时' % path, path=path, network_type='timeout')
+        raise ILinkError('wechat.net.timeout', detail='GET %s timeout' % path,
+                        path=path, network_type='timeout')
     except (requests.RequestException, OSError) as exc:
         BM_LOG.warning('[微信推送][HTTP] !! GET %s 网络错误: %s' % (safe_path, exc))
-        raise ILinkError('GET %s 网络错误: %s' % (path, exc), path=path, network_type='network')
+        raise ILinkError('wechat.net.error', detail='GET %s: %s' % (path, exc),
+                        path=path, network_type='network')
     data = _parse_json(resp.text, path, resp.status_code)
     BM_LOG.info('[微信推送][HTTP] <- GET %s HTTP %s %s' % (safe_path, resp.status_code, summary(data)))
     BM_LOG.debug('[微信推送][HTTP]    GET %s 响应体=%s' % (safe_path, redact(data)))

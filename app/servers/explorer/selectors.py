@@ -7,6 +7,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import os
 import subprocess
 from pathlib import Path
+from app.utils import BmError
 from .manager import FileExplorerManager
 
 
@@ -28,7 +29,7 @@ class SelectedActiveWindow:
                     return window
             except:
                 continue
-        raise ValueError(f"未找到路径窗口: {active_path}")
+        raise BmError('explorer.window.not_found', path=str(active_path))
 
     def get_selected_items(self) -> list:
         window = self.get_active_folder_window()
@@ -37,7 +38,7 @@ class SelectedActiveWindow:
 
         items = window.Document.SelectedItems()
         if items.Count >= 500:
-            raise ValueError("选中项过多")
+            raise BmError('explorer.selection.too_many', limit=500)
         return [item.Path for item in items]
 
     def _get_desktop_files(self):

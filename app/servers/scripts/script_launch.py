@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from app.data import ProjectGlobal, ScriptDatabase
 from app.servers.scripts.script_run import ScriptRunner, ScriptNotFoundError
-from app.utils import BM_LOG, ParameterManager
+from app.utils import BmError, BM_LOG, ParameterManager
 from app.utils.parameter_generate import build_launch_env
 
 
@@ -23,11 +23,11 @@ from app.utils.parameter_generate import build_launch_env
 _SAFE_TEMP_NAME = re.compile(r'^(bms_)?[0-9a-fA-F-]{8,}\.json$')
 
 
-class ScriptBusyError(Exception):
+class ScriptBusyError(BmError):
     """脚本已在运行中（原子占用失败）"""
 
     def __init__(self, script_id: str):
-        super().__init__(f"脚本正在运行中: {script_id}")
+        super().__init__('script.busy', script_id=script_id)
         self.script_id = script_id
 
 
@@ -66,8 +66,18 @@ class ScriptLaunchService:
     def _load(script_id: str):
         data = ScriptDatabase().get_script_by_id(script_id)
         if data is None:
-            raise ScriptNotFoundError(f"脚本不存在或已被卸载: {script_id}")
+            raise ScriptNotFoundError(script_id)
         return data
+
+    @staticmethod
+    def _effective_policy(script_data, invoke_mode: str) -> str:
+        """single / forward；定时任务不启用 forward，避免后台叠 GUI。"""
+        policy = str(getattr(script_data, "concurrency", "single") or "single").lower()
+        if policy not in ("single", "forward"):
+            policy = "single"
+        if invoke_mode == "scheduled" and policy == "forward":
+            return "single"
+        return policy
 
     @classmethod
     def prepare(cls, script_id: str, *, data=None, params_overrides=None,
@@ -81,20 +91,29 @@ class ScriptLaunchService:
         reserve_first=True 时先原子占用；用户取消 / 异常 → 自动释放占用并删除 JSON，
         返回 None 表示用户取消。
 
+        concurrency="forward" 的脚本不占用运行键：每次触发都会构造参数并启动新进程，
+        由脚本自己通过 IPC 把参数转发给已有 GUI。定时任务仍按 single 处理。
+
         holds_reservation: reserve_first=False 且调用方已自行 reserve() 时置 True，
         把占用所有权转交给本 ctx，由 cleanup() 统一释放（避免各入口重复实现释放逻辑）。
         """
+        script_data = cls._load(script_id)
+        policy = cls._effective_policy(script_data, invoke_mode)
+
         owned = False
         if reserve_first:
-            if not cls.reserve(script_id):
-                raise ScriptBusyError(script_id)
-            owned = True
+            if policy != "forward":
+                if not cls.reserve(script_id):
+                    raise ScriptBusyError(script_id)
+                owned = True
         elif holds_reservation:
-            owned = True
+            if policy == "forward":
+                cls.release(script_id)
+            else:
+                owned = True
 
         json_path = None
         try:
-            script_data = cls._load(script_id)
             if isinstance(data, (list, tuple)):
                 data_list = list(data)
             elif data is None:
@@ -124,7 +143,7 @@ class ScriptLaunchService:
                 env_extra=env_extra,
             )
             if not json_path:
-                raise RuntimeError('参数文件构造失败')
+                raise BmError('script.params.build_failed')
 
             return LaunchContext(
                 script_id=script_id,

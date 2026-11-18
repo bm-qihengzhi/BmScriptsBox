@@ -6,8 +6,8 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 from typing import Optional
 
-from PySide2.QtCore import Qt, Signal
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame
 
 from app.utils import BM_LOG
 from app.utils.tools import BmTools
@@ -29,7 +29,7 @@ class HotkeySettingWidget(XDialog):
         self._key_set = bool(hotkey_key)
         self.script_name = script_name
         self._conflict_check_fn = conflict_check_fn
-        self.resize(360, 260)
+        self.resize_content(360, 260)
         self._keyboard_hook = None
         self.add_ui()
         self._combo_detected.connect(self._on_combo_received)
@@ -82,7 +82,7 @@ class HotkeySettingWidget(XDialog):
             conflict_name = self._conflict_check_fn(key_name)
             if conflict_name:
                 self._conflict_label.setText(
-                    tr('快捷键已被 "{}"脚本占用').format(conflict_name))
+                    tr('Shortcut is already used by "{}"').format(conflict_name))
                 self._conflict_label.show()
             else:
                 self._conflict_label.hide()
@@ -95,7 +95,7 @@ class HotkeySettingWidget(XDialog):
 
     def save(self):
         if not self._key_set:
-            self._conflict_label.setText(tr('请先按键设置快捷键'))
+            self._conflict_label.setText(tr('Press keys to set a shortcut first'))
             self._conflict_label.show()
             return
         self.handle_signal.emit((self.script_id, self.hotkey_label.text()))

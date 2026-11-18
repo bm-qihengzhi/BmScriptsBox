@@ -4,15 +4,23 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QFrame
-from xsideui import XGroupCard, XLabel, XPushButton, XSize, XButtonVariant, XColor, tr, XScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QFrame
+from xsideui import XGroupCard, XLabel, XPushButton, XSize, XButtonVariant, XColor, tr, XScrollArea, XI18N
 
 from app.utils import BmNotify, BM_LOG
 from app.servers.wechat_push import WechatPushService
 from app.servers.wechat_push.login_dialog import WechatLoginDialog
 
-_BTN_LOGIN = '扫码绑定'
-_BTN_BIND = '重新绑定'
+_STATUS_LABELS = {
+    '需重新扫码': 'Scan again required',
+    '未登录': 'Not logged in',
+    '已登录，未绑定': 'Logged in, not bound',
+    '最近推送被拒，可尝试重新绑定': 'Recent push rejected, try re-binding',
+    '已连接': 'Connected',
+}
+
+_BTN_LOGIN = 'Scan to Bind'
+_BTN_BIND = 'Re-bind'
 
 
 
@@ -40,7 +48,8 @@ class PushWidget(QWidget):
         scroll.setWidget(frame)
         frame_layout = QVBoxLayout(frame)
         frame_layout.setContentsMargins(0, 0, 0, 0)
-
+        frame_layout.setSpacing(20)
+        frame_layout.addWidget(XLabel('Push Notification', style=XLabel.Style.H3))
         card = XGroupCard(title=tr('WeChat ClawBot'))
         frame_layout.addWidget(card)
         frame_layout.addStretch(1)
@@ -60,9 +69,9 @@ class PushWidget(QWidget):
 
         # 绑定 / 断开 / 测试
         btn_group = card.add_group()
-        self.wechat_bind_btn = XPushButton(text=_BTN_LOGIN, size=XSize.SMALL,
+        self.wechat_bind_btn = XPushButton(text=tr(_BTN_LOGIN), size=XSize.SMALL,
                                            variant=XButtonVariant.FILLED, color='primary')
-        self.wechat_logout_btn = XPushButton(text='断开连接', size=XSize.SMALL,
+        self.wechat_logout_btn = XPushButton(text=tr('Disconnect'), size=XSize.SMALL,
                                              variant=XButtonVariant.FILLED, color=XColor.TERTIARY)
         self.wechat_test_btn = XPushButton(text=tr('Send Test'), size=XSize.SMALL,
                                            variant=XButtonVariant.FILLED, color=XColor.TERTIARY)
@@ -82,9 +91,10 @@ class PushWidget(QWidget):
         """只读内存里的服务状态，不发任何网络请求。"""
         svc = WechatPushService.instance()
         logged = svc.is_logged_in()
-        self.wechat_status_label.setText(svc.connection_status())
-        self.wechat_to_label.setText(svc.recipient_id() or '未绑定')
-        self.wechat_bind_btn.setText(_BTN_BIND if logged else _BTN_LOGIN)
+        self.wechat_status_label.setText(tr(_STATUS_LABELS.get(
+            svc.connection_status(), svc.connection_status())))
+        self.wechat_to_label.setText(svc.recipient_id() or tr('Not bound'))
+        self.wechat_bind_btn.setText(tr(_BTN_BIND) if logged else tr(_BTN_LOGIN))
         self.wechat_logout_btn.setEnabled(logged)
 
 
@@ -94,35 +104,35 @@ class PushWidget(QWidget):
         """未登录走扫码+绑定，已登录只重开绑定窗口；两者都由窗口生命周期管住收发。"""
         svc = WechatPushService.instance()
         if svc.session_busy():
-            BmNotify().show_warning_notify('上一次绑定还在收尾，请过几秒再试', in_window=True)
+            BmNotify().show_warning_notify(XI18N.x_tr('Previous binding is still finishing, try again in a few seconds'), in_window=True)
             return
         mode = 'bind' if svc.is_logged_in() else 'login'
         dlg = WechatLoginDialog(parent=self, mode=mode)
         dlg.login_finished.connect(self._on_dialog_finished)
-        dlg.exec_()
+        dlg.exec()
         self._refresh_state()
 
     def _on_dialog_finished(self, ok, msg):
         """扫码窗口内部已把「登录 + 绑定」跑完，这里只报结果。"""
         if ok:
             # 绑定成功但回执没送达时，worker 会带上一句如实的 msg
-            BmNotify().show_success_notify(msg or '已连接并绑定收件人', in_window=True)
+            BmNotify().show_success_notify(msg or XI18N.x_tr('Connected and bound recipient'), in_window=True)
         elif msg and msg != '已取消':
             BmNotify().show_warning_notify(msg, in_window=True)
 
     def _logout(self):
         WechatPushService.instance().logout()
-        BmNotify().show_success_notify('已断开连接，需重新扫码才能推送', in_window=True)
+        BmNotify().show_success_notify(XI18N.x_tr('Disconnected, scan again to push'), in_window=True)
         self._refresh_state()
 
     # ------------------------------------------------------------------ 测试
 
     def _send_wechat_test(self):
         svc = WechatPushService.instance()
-        if svc.send('这是一条来自不忙脚本盒子的测试消息'):
-            BmNotify().show_success_notify('测试消息已发送', in_window=True)
+        if svc.send(XI18N.x_tr('This is a test message from BmScriptsBox')):
+            BmNotify().show_success_notify(XI18N.x_tr('Test message sent'), in_window=True)
         else:
-            reason = svc.last_skip_reason() or '未知原因，详见日志 BmLogs/BmLogs.log'
+            reason = svc.last_skip_reason() or XI18N.x_tr('Unknown reason, see BmLogs/BmLogs.log')
             BM_LOG.warning('[微信推送] 测试发送未成功：%s' % reason)
-            BmNotify().show_warning_notify('发送未成功：%s' % reason, in_window=True)
+            BmNotify().show_warning_notify(XI18N.x_tr('Send failed: %s') % reason, in_window=True)
         self._refresh_state()

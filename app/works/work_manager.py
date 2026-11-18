@@ -4,7 +4,9 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
+
+from app.utils import BM_LOG
 
 
 class WorkerManager(QObject):
@@ -39,23 +41,40 @@ class WorkerManager(QObject):
         from app.servers.monitor import get_mouse_monitor, get_double_monitor, get_hotkey_manager
         from .work_http import FlaskWork
 
-        mm = get_mouse_monitor()
-        mm.start()
-        mm.middle_clicked.connect(self._on_activate)
+        def _step(name, func):
+            try:
+                func()
+                return True
+            except Exception as e:
+                BM_LOG.error(f"[后台启动] {name} 失败: {type(e).__name__}: {e}")
+                return False
 
-        dm = get_double_monitor()
-        dm.start()
-        dm.double_key_triggered.connect(self._on_activate)
+        def _start_mouse():
+            mm = get_mouse_monitor()
+            mm.start()
+            mm.middle_clicked.connect(self._on_activate)
 
-        hm = get_hotkey_manager()
-        hm.start()
-        hm.hotkey_triggered.connect(self._on_hotkey)
+        def _start_double():
+            dm = get_double_monitor()
+            dm.start()
+            dm.double_key_triggered.connect(self._on_activate)
 
-        self.http_work = FlaskWork()
-        self.http_work.signals.show_notify.connect(self._on_notify)
-        self.http_work.signals.execute_script_request.connect(
-            lambda ctx: self.context_menu_triggered.emit(ctx.script_id, ctx.json_path))
-        self.http_work.start()
+        def _start_hotkey():
+            hm = get_hotkey_manager()
+            hm.start()
+            hm.hotkey_triggered.connect(self._on_hotkey)
+
+        def _start_http():
+            self.http_work = FlaskWork()
+            self.http_work.signals.show_notify.connect(self._on_notify)
+            self.http_work.signals.execute_script_request.connect(
+                lambda ctx: self.context_menu_triggered.emit(ctx.script_id, ctx.json_path))
+            self.http_work.start()
+
+        _step("鼠标中键监听", _start_mouse)
+        _step("双击按键监听", _start_double)
+        _step("全局热键", _start_hotkey)
+        _step("本地 HTTP 服务", _start_http)
 
         try:
             from app.cloud.works import BannerUpdateWork, CheckUpdateWork

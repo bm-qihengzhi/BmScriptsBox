@@ -11,10 +11,10 @@ import time
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from PySide2.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 
 from app.data import ProjectGlobal
-from app.utils import BM_LOG
+from app.utils import BmError, BM_LOG
 from app.utils.region import is_china
 
 
@@ -49,7 +49,7 @@ class XDownLoad(QObject):
         """定位并校验 MUDL 可执行文件"""
         path = Path(__file__).parent / 'mudl.exe'
         if not path.exists():
-            raise FileNotFoundError(f"找不到 MUDL 下载工具: {path}")
+            raise BmError('install.tool.missing', tool=str(path))
         return path
 
     @Slot(str, str)
@@ -67,7 +67,7 @@ class XDownLoad(QObject):
     def download(self, down_url: str, save_folder, cn_url: str = None,
                  output_filename: str = None) -> str:
         if not down_url:
-            raise ValueError("URL 不能为空")
+            raise BmError('download.url.empty')
 
         parsed_url = urlparse(down_url)
         is_github = "github" in parsed_url.netloc.lower()
@@ -77,7 +77,7 @@ class XDownLoad(QObject):
         else:
             filename = Path(unquote(parsed_url.path)).name
         if not filename:
-            raise ValueError("无法从 URL 中解析出文件名")
+            raise BmError('download.url.no_filename', url=down_url)
 
         save_dir = Path(save_folder)
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -222,7 +222,7 @@ class XDownLoad(QObject):
             raise RuntimeError(error_msg)
 
         if not save_path.exists() or save_path.stat().st_size == 0:
-            raise RuntimeError(f"下载产物缺失或为空: {save_path}")
+            raise BmError('download.result.missing', path=str(save_path))
 
         self.download_finished.emit(str(save_path))
         return str(save_path)

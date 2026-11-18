@@ -6,7 +6,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import time
 from threading import Lock
-from PySide2.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import QObject, Signal, QTimer
 from app.utils import BM_LOG
 class ShortcutState:
     IDLE = 0
@@ -138,7 +138,7 @@ class ClipboardMonitor(QObject):
     def _read_clipboard(self):
         """读取剪贴板文本（GUI 线程），使用 Qt 自带剪贴板，无额外依赖"""
         try:
-            from PySide2.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
             text = QApplication.clipboard().text()
             if text and text.strip():
                 self.triggered.emit(text.strip(), "")

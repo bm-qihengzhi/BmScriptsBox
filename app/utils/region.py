@@ -6,8 +6,6 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 import time
 
-import requests
-
 _IS_CHINA = None
 _CACHE_TIME = 0
 
@@ -15,6 +13,7 @@ _CACHE_TIME = 0
 def is_china() -> bool:
     """检测当前网络是否在中国区，10 分钟缓存"""
     global _IS_CHINA, _CACHE_TIME
+    import requests
     now = time.time()
     if _IS_CHINA is not None and now - _CACHE_TIME < 600:
         return _IS_CHINA

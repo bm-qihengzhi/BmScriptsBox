@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 from typing import Union, Optional, List
 
-from app.utils import BmTools
+from app.utils import BmError, BmTools
 
 
 class ArchiveExtractor:
@@ -45,11 +45,11 @@ class ArchiveExtractor:
         """获取并校验外部解压工具路径"""
         path = self._tool_path or Path(__file__).parent / '7zr.exe'
         if not path:
-            raise RuntimeError("未配置7zr解压工具路径！")
+            raise BmError('install.tool.missing', tool='7zr')
 
         path_obj = Path(path)
         if not path_obj.exists():
-            raise FileNotFoundError(f"找不到7zr工具程序: {path}")
+            raise BmError('install.tool.missing', tool=str(path))
 
         return str(path_obj.resolve())
 
@@ -79,7 +79,7 @@ class ArchiveExtractor:
         """
         source_path = Path(source_file)
         if not source_path.exists():
-            raise FileNotFoundError(f"文件不存在: {source_path}")
+            raise BmError('install.package.not_found', path=str(source_path))
 
         # 如果未指定目录，则在同级目录下创建与文件名相同的文件夹
         if target_dir is None:
@@ -110,18 +110,23 @@ class ArchiveExtractor:
                 return source_file
 
             else:
-                raise ValueError(f"不支持的压缩格式: {source_path.suffix}")
+                raise BmError('install.archive.unsupported',
+                              suffix=source_path.suffix)
 
             if remove_source:
                 source_path.unlink(missing_ok=True)
 
             return str(target_path.resolve())
 
+        except BmError:
+            if target_path.exists() and any(target_path.iterdir()):
+                BmTools.remove_dir(target_path)
+            raise
         except Exception as e:
             # 失败清理：如果产生了文件夹但解压中断，则清理掉
             if target_path.exists() and any(target_path.iterdir()):
                 BmTools.remove_dir(target_path)
-            raise RuntimeError(f"解压失败: {str(e)}")
+            raise BmError('install.extract.failed', path=str(source_path)) from e
 
     # --- 具体的解压执行逻辑 ---
 
@@ -160,7 +165,7 @@ class ArchiveExtractor:
             if not name or ftype in self._7Z_CONTAINER_TYPES:
                 continue
             if not self._is_safe_member(base, name):
-                raise RuntimeError(f"压缩包内存在非法路径，已中止: {name}")
+                raise BmError('install.archive.illegal_path', name=name)
 
     def extract_and_overwrite(self, source: Union[str, Path], working_dir: Union[str, Path]):
         """强制覆盖解压 (常用于增量更新)"""
@@ -198,13 +203,15 @@ class ArchiveExtractor:
         with zipfile.ZipFile(source, 'r') as ref:
             infos = ref.infolist()
             if len(infos) > cls.MAX_ENTRIES:
-                raise RuntimeError(f"压缩包条目过多（{len(infos)}），已中止")
+                raise BmError('install.archive.too_many_entries',
+                              count=len(infos), limit=cls.MAX_ENTRIES)
             total = sum(i.file_size for i in infos)
             if total > cls.MAX_TOTAL_SIZE:
-                raise RuntimeError(f"压缩包解压体积过大（{total} 字节），已中止")
+                raise BmError('install.archive.too_large',
+                              size=total, limit=cls.MAX_TOTAL_SIZE)
             for info in infos:
                 if not cls._is_safe_member(base, info.filename):
-                    raise RuntimeError(f"压缩包内存在非法路径，已中止: {info.filename}")
+                    raise BmError('install.archive.illegal_path', name=info.filename)
             ref.extractall(destination)
 
     @classmethod
@@ -213,16 +220,18 @@ class ArchiveExtractor:
         with tarfile.open(source, 'r:*') as ref:
             members = ref.getmembers()
             if len(members) > cls.MAX_ENTRIES:
-                raise RuntimeError(f"压缩包条目过多（{len(members)}），已中止")
+                raise BmError('install.archive.too_many_entries',
+                              count=len(members), limit=cls.MAX_ENTRIES)
             total = sum(m.size for m in members if m.isfile())
             if total > cls.MAX_TOTAL_SIZE:
-                raise RuntimeError(f"压缩包解压体积过大（{total} 字节），已中止")
+                raise BmError('install.archive.too_large',
+                              size=total, limit=cls.MAX_TOTAL_SIZE)
             for m in members:
                 if not cls._is_safe_member(base, m.name):
-                    raise RuntimeError(f"压缩包内存在非法路径，已中止: {m.name}")
+                    raise BmError('install.archive.illegal_path', name=m.name)
                 if (m.issym() or m.islnk()) and not cls._is_safe_member(base, m.linkname):
-                    raise RuntimeError(
-                        f"压缩包内含越界链接，已中止: {m.name} -> {m.linkname}")
+                    raise BmError('install.archive.illegal_link',
+                                  name=m.name, target=m.linkname)
             try:
                 ref.extractall(destination, filter='data')  # Python >= 3.12
             except TypeError:

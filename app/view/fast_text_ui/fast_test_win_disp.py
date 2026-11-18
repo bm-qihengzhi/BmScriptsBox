@@ -5,12 +5,12 @@ SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
 
-from PySide2.QtCore import Qt, QTimer, QSize
-from PySide2.QtGui import QIcon
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QApplication, QTableWidgetItem
+from PySide6.QtCore import Qt, QTimer, QSize
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication, QTableWidgetItem, QHBoxLayout
 
 from xsideui import XLabel, XTableWidget, XMenu, XSwitch, \
-    XLineEdit, IconName, XIcon, XColor, XSize, XDivider, tr
+    XLineEdit, IconName, XIcon, XColor, XSize, XDivider, tr, XCard
 
 from app.data import ProjectGlobal, ScriptDatabase
 from app.utils.tools import BmTools
@@ -31,29 +31,27 @@ class FastTextWidget(QWidget):
         layout.setSpacing(11)
         layout.setContentsMargins(11, 11, 11, 11)
 
-        title = XLabel(tr('Quick Copy Trigger'), style=XLabel.Style.H4).set_font_size(18)
-        desc = XLabel(tr('Select text, press Ctrl+C+C to open the "Super Copy" script list. Choose a script to run — the selected text will be passed as a parameter.'),word_wrap=True)
-        desc.set_font_size(13).set_color(XColor.TERTIARY)
-        layout.addWidget(title)
-        layout.addWidget(desc)
-        layout.addWidget(XDivider())
 
+        title_layout = QHBoxLayout()
+        title_layout.addWidget(XLabel(tr('Super Copy Trigger'), style=XLabel.Style.H3))
         self.search_bar = XLineEdit(placeholder=tr('Search scripts...'), prefix_icon=IconName.SEARCH)
         self.search_bar.textChanged.connect(self.filter_scripts)
+        title_layout.addWidget(self.search_bar)
+        layout.addLayout(title_layout)
 
-        layout.addWidget(self.search_bar)
+        super_card = XCard()
+        self.super_copy_list = XTableWidget(style=XTableWidget.Style.DEFAULT, select_mode="row", hover_mode="row")
+        self.super_copy_list.setIconSize(QSize(24, 24))
+        self.super_copy_list.set_headers([tr('Script Name'), tr('Status')])
+        self.super_copy_list.set_column_widths([-1, 100])
+        super_card.addWidget(self.super_copy_list)
 
-        # 定时任务列表
-        self.test_widget_list = XTableWidget(row_height=48)
-        self.test_widget_list.setIconSize(QSize(24, 24))
-        self.test_widget_list.set_headers([tr('Script Name'), tr('Status')])
-        self.test_widget_list.set_column_widths([-1, 100])
 
         # 启用右键菜单
-        self.test_widget_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.test_widget_list.customContextMenuRequested.connect(self._show_context_menu)
+        self.super_copy_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.super_copy_list.customContextMenuRequested.connect(self._show_context_menu)
 
-        layout.addWidget(self.test_widget_list)
+        layout.addWidget(super_card)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -77,12 +75,12 @@ class FastTextWidget(QWidget):
     def update_table(self, data: list):
         """更新超级复制列表"""
         data = data or []
-        self.test_widget_list.setRowCount(0)
+        self.super_copy_list.setRowCount(0)
         # 计算符合条件的数据数量
         valid_scripts = [item for item in data if item.triggers_schema.get('quick_copy', {}).get('enabled', False)]
 
         # 设置表格行数
-        self.test_widget_list.setRowCount(len(valid_scripts))
+        self.super_copy_list.setRowCount(len(valid_scripts))
         # 填充数据
         for row, script_data in enumerate(valid_scripts):
             item = QTableWidgetItem(script_data.name)
@@ -91,7 +89,7 @@ class FastTextWidget(QWidget):
             if not icon:
                 icon = BmTools.get_language_icon_path(script_data.language)
             item.setIcon(QIcon(icon))
-            self.test_widget_list.setItem(row, 0, item)
+            self.super_copy_list.setItem(row, 0, item)
             self._setup_status_switch(row, script_data)
 
     def _setup_status_switch(self, row, data):
@@ -101,7 +99,7 @@ class FastTextWidget(QWidget):
         switch.clicked.connect(
             lambda checked, sid=data.id: self._switch_script_active(sid, checked)
         )
-        self.test_widget_list.setCellWidget(row, 1, switch)
+        self.super_copy_list.setCellWidget(row, 1, switch)
 
     def _switch_script_active(self, sid, checked):
         """切换脚本显示状态"""
@@ -113,11 +111,11 @@ class FastTextWidget(QWidget):
         menu = XMenu(parent=self)
 
         # 获取点击位置对应的行
-        index = self.test_widget_list.indexAt(pos)
+        index = self.super_copy_list.indexAt(pos)
         if not index.isValid():  # 点击在非有效区域
             return
         row = index.row()
-        item = self.test_widget_list.item(row, 0)  # 获取第0列的item
+        item = self.super_copy_list.item(row, 0)  # 获取第0列的item
         db_id = item.data(Qt.UserRole)  # 从item中拿到数据ID
 
         script_data = self.get_data(db_id)
@@ -136,7 +134,7 @@ class FastTextWidget(QWidget):
             )
 
         # 显示菜单
-        menu.exec_(self.test_widget_list.viewport().mapToGlobal(pos))
+        menu.exec(self.super_copy_list.viewport().mapToGlobal(pos))
 
     def get_data(self, db_id):
         """获取任务数据"""
@@ -164,4 +162,4 @@ if __name__ == '__main__':
     app = QApplication([])
     window = FastTextWidget()
     window.show()
-    app.exec_()
+    app.exec()

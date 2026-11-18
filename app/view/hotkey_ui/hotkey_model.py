@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from app.data import ProjectGlobal, ScriptDatabase, ScriptEntity
 from app.servers.monitor import HotkeyManager
+from app.utils import BmError
 from app.utils.pinyin_search import PinyinSearchIndex
 
 
@@ -57,9 +58,9 @@ class HotkeyModel:
         """保存快捷键（校验 → 试注册 → 写库 → reload，失败回滚）"""
         hotkey_key = (hotkey_key or '').strip()
         if not hotkey_key:
-            raise ValueError("快捷键不能为空")
+            raise BmError('hotkey.empty')
         if re.search(r'[\u4e00-\u9fa5]', hotkey_key):
-            raise ValueError("快捷键不能包含中文")
+            raise BmError('hotkey.cjk_not_allowed')
         self._assert_registerable(hotkey_key)
 
         prev = self.db.get_script_by_id(script_id)
@@ -90,7 +91,7 @@ class HotkeyModel:
         try:
             hook = kb.add_hotkey(hotkey_key, lambda: None, suppress=False)
         except Exception as e:
-            raise ValueError(f"无法识别的快捷键: {hotkey_key}") from e
+            raise BmError('hotkey.invalid', key=str(hotkey_key)) from e
         finally:
             if hook is not None:
                 try:

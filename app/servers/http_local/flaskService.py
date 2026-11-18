@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 
 import flask
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
 from app.data import ScriptDatabase
 from app.utils import BM_LOG, BmTools, ParameterManager
 from app.servers.scripts import ScriptLaunchService, ScriptBusyError, ScriptNotFoundError
@@ -171,9 +171,9 @@ class FlaskServer:
                         params_defs=params_defs, invoke_mode="manual",
                         allow_params_form=False, reserve_first=True, env_extra=env_extra,
                     )
-                except ScriptBusyError:
+                except ScriptBusyError as e:
                     return flask.jsonify(
-                        {"status": "error", "message": "脚本正在运行中，请等待完成"}), 200
+                        {"status": "error", "message": str(e)}), 200
                 except ScriptNotFoundError as e:
                     return flask.jsonify({"status": "error", "message": str(e)}), 404
 
@@ -344,16 +344,10 @@ class FlaskServer:
 
     @staticmethod
     def _validate_params(params_defs: list, merged: dict) -> str:
-        """校验必填与 select 取值；通过返回 None，否则返回错误消息"""
-        for pd in params_defs or []:
-            name = pd.get('name')
-            if pd.get('required') and (name not in merged or merged.get(name) in (None, '')):
-                return f"缺少必填参数: {name}"
-            if pd.get('type') == 'str' and pd.get('choices'):
-                val = merged.get(name)
-                if val not in (None, '') and val not in pd['choices']:
-                    return f"参数 {name} 取值 '{val}' 不在可选范围 {pd['choices']}"
-        return None
+        """校验必填与 choices 取值；通过返回 None，否则返回错误消息
+        （口径与交互弹窗、定时任务共用 app.utils.params_validate）"""
+        from app.utils.params_validate import validate_params
+        return validate_params(params_defs, merged)
 
     @staticmethod
     def _parse_input_list(script_data, data) -> list:
@@ -387,9 +381,13 @@ class FlaskServer:
             script_data = ScriptDatabase().get_script_by_id(script_id)
             if not script_data:
                 return
-            # 先原子占用，避免弹窗期间被其它入口重复触发
-            if not ScriptLaunchService.reserve(script_id):
-                return
+            # 先原子占用，避免弹窗期间被其它入口重复触发；
+            # forward 脚本不占用，弹窗期间允许多次触发由脚本自行转发。
+            policy = ScriptLaunchService._effective_policy(
+                script_data, "manual")
+            if policy != "forward":
+                if not ScriptLaunchService.reserve(script_id):
+                    return
             try:
                 res = show_params_prompt(script_data, params_list)
                 if res is None:  # 用户取消，不启动

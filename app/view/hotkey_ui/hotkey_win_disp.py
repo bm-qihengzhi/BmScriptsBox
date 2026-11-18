@@ -7,13 +7,12 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import sys
 from pathlib import Path
 
-from PySide2.QtCore import Qt, Signal, QTimer, QSize
-from PySide2.QtGui import QIcon
-from PySide2.QtWidgets import QWidget, QVBoxLayout, QTableWidgetItem, QApplication
-
+from PySide6.QtCore import Qt, Signal, QTimer, QSize
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidgetItem, QApplication, QHBoxLayout
 
 from xsideui import XTableWidget, XSwitch, XMenu, XLineEdit, XLabel, XIcon, \
-    IconName, XColor, XNotif, XSize as XUISize, tr, XDivider
+    IconName, XColor, XNotif, XSize as XUISize, tr, XDivider, XCard, XI18N
 from app.utils import BmTools
 from app.data import ScriptEntity
 from .hotkey_pr import HotkeyPresenter
@@ -42,29 +41,28 @@ class HotkeyWidget(QWidget):
         self.main_layout.setContentsMargins(11, 11, 11, 11)
         self.main_layout.setSpacing(11)
 
-        header_container = QVBoxLayout()
+        header_container = QHBoxLayout()
         header_container.setSpacing(11)
 
-        title = XLabel(tr('Global Hotkey Trigger'), style=XLabel.Style.H4).set_font_size(18)
-        desc = XLabel(tr('Set global hotkeys for scripts. Launch method (select file/folder vs. in File Explorer) depends on scripts parameter requirements. See list below.'),word_wrap=True)
-        desc.set_font_size(13).set_color(XColor.TERTIARY)
-        header_container.addWidget(title)
-        header_container.addWidget(desc)
-        header_container.addWidget(XDivider())
+        title = XLabel(tr('Global Hotkey Trigger'), style=XLabel.Style.H3)
+
 
         self.search_bar = XLineEdit(placeholder=tr('Search scripts...'), prefix_icon=IconName.SEARCH)
         self.search_bar.textChanged.connect(self._on_search_text_changed)
-        header_container.addWidget(self.search_bar)
+        header_container.addWidget(title,0)
+        header_container.addWidget(self.search_bar,1)
 
         self.main_layout.addLayout(header_container)
-        self.table_widget = XTableWidget(row_height=48)
+        self.table_widget = XTableWidget(style=XTableWidget.Style.DEFAULT, select_mode="row", hover_mode="row")
         self.table_widget.set_headers([tr('Name'), tr('Hotkey'), tr('Status'), tr('Usage')])
-        self.table_widget.set_column_widths([-1, 80, 60, 200])
+        self.table_widget.set_column_widths([-1, 80, 60, 300])
         self.table_widget.setIconSize(QSize(24, 24))
         self.table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_widget.customContextMenuRequested.connect(self._show_context_menu)
 
-        self.main_layout.addWidget(self.table_widget)
+        table_card = XCard()
+        table_card.addWidget(self.table_widget)
+        self.main_layout.addWidget(table_card)
 
     def _init_presenter_signals(self):
         self.presenter.scripts_loaded.connect(self._on_scripts_loaded)
@@ -93,7 +91,8 @@ class HotkeyWidget(QWidget):
         icon_path = script.icon or BmTools.get_language_icon_path(script.language)
         item_name.setIcon(QIcon(icon_path))
         self.table_widget.setItem(row, 0, item_name)
-        self.table_widget.setItem(row, 1, QTableWidgetItem(script.hotkey or tr('None')))
+        # 原生 QTableWidgetItem / setToolTip 不会自动查表，必须显式 x_tr
+        self.table_widget.setItem(row, 1, QTableWidgetItem(script.hotkey or XI18N.x_tr('None')))
 
         switch = XSwitch(checked=script.hotkey_active, text_on='', text_off='', size=XUISize.SMALL)
         switch.clicked.connect(lambda checked, sid=script.id: self.presenter.toggle_status(sid, checked))
@@ -101,25 +100,30 @@ class HotkeyWidget(QWidget):
 
         shortcut_type = script.triggers_schema['shortcut'].get('input_type','')
         if not shortcut_type:
-            item_info = QTableWidgetItem('直接执行')
-            item_info.setIcon(XIcon.get(IconName.CHECK_CIRCLE, color=XColor.SUCCESS, size=18).pixmap())
+            item_info = QTableWidgetItem(XI18N.x_tr('Run directly'))
+            item_info.setIcon(XIcon.get(IconName.CHECK_CIRCLE, color=XColor.SUCCESS).icon())
         else:
             type_map = {
-                'files': (tr('选中文件使用快捷键'), IconName.FILE, tr('Run on selected file (auto pass path)')),
-                'folders': (tr('选中文件夹使用快捷键'), IconName.FOLDER,  tr('Run on selected folder (auto pass path)')),
-                'items': (tr('选中文件/文件夹使用快捷键'), IconName.CHECK_CIRCLE,  tr('Run on selected file/folder (auto pass path)')),
-                'active': (tr('在资源管理器中使用快捷键'), IconName.WINDOWS,  tr('Run in File Explorer (auto pass path)')),
+                'files': (XI18N.x_tr('Hotkey for selected files'), IconName.FILE, XI18N.x_tr('Run on selected file (auto pass path)')),
+                'folders': (XI18N.x_tr('Hotkey for selected folders'), IconName.FOLDER,  XI18N.x_tr('Run on selected folder (auto pass path)')),
+                'items': (XI18N.x_tr('Hotkey for selected files/folders'), IconName.CHECK_CIRCLE,  XI18N.x_tr('Run on selected file/folder (auto pass path)')),
+                'active': (XI18N.x_tr('Hotkey inside File Explorer'), IconName.WINDOWS,  XI18N.x_tr('Run in File Explorer (auto pass path)')),
             }
             if shortcut_type in type_map:
                 display_text, icon_name, tip = type_map[shortcut_type]
-                pixmap = XIcon.get(icon_name, color=XColor.SECONDARY, size=18).pixmap()
                 item_info = QTableWidgetItem(display_text)
-                item_info.setIcon(pixmap)
                 item_info.setToolTip(tip)
+                item_info.setIcon(
+                    XIcon.get(
+                        icon_name,
+                        color=XColor.SECONDARY,
+                    ).icon()
+                )
+
 
             else:
-                item_info = QTableWidgetItem('直接执行')
-                item_info.setIcon(XIcon.get(IconName.CHECK_CIRCLE, color=XColor.SUCCESS, size=18).pixmap())
+                item_info = QTableWidgetItem(XI18N.x_tr('Run directly'))
+                item_info.setIcon(XIcon.get(IconName.CHECK_CIRCLE, color=XColor.SUCCESS, size=18).icon())
 
         self.table_widget.setItem(row, 3, item_info)
 
@@ -144,7 +148,7 @@ class HotkeyWidget(QWidget):
             icon=XIcon(name=IconName.DELETE, color=XColor.DANGER).icon(),
             triggered=lambda: self.presenter.remove_hotkey(script.id),
         )
-        menu.exec_(self.table_widget.viewport().mapToGlobal(pos))
+        menu.exec(self.table_widget.viewport().mapToGlobal(pos))
 
     def _on_notification(self, message: str, is_success: bool):
         if is_success:
@@ -159,7 +163,7 @@ class HotkeyWidget(QWidget):
             parent=self,
         )
         setup_window.handle_signal.connect(self._on_hotkey_saved)
-        setup_window.exec_()
+        setup_window.exec()
 
     def _on_hotkey_saved(self, hotkey_info: tuple):
         script_id, hotkey_key = hotkey_info
@@ -172,4 +176,4 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = HotkeyWidget()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

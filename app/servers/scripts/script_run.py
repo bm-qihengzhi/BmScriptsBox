@@ -17,12 +17,16 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from app.data import ScriptDatabase
-from app.utils import BM_LOG, BmTools
+from app.utils import BmError, BM_LOG, BmTools
 from app.servers.packages import PackagesManager
 
 
-class ScriptNotFoundError(Exception):
+class ScriptNotFoundError(BmError):
     """脚本不存在或已被卸载"""
+
+    def __init__(self, script_id):
+        super().__init__('script.not_found', script_id=script_id)
+        self.script_id = script_id
 
 
 class ScriptRunner:
@@ -107,7 +111,7 @@ class ScriptRunner:
             self.db = ScriptDatabase()
         results = self.db.get_script_by_id(script_id)
         if results is None:
-            raise ScriptNotFoundError(f"脚本不存在或已被卸载: {script_id}")
+            raise ScriptNotFoundError(script_id)
         return (results.entry,
                 results.language,
                 results.language_version,
@@ -121,12 +125,12 @@ class ScriptRunner:
         lang = lang.lower()
 
         if lang not in self.configs:
-            raise ValueError(f"不支持的语言: {lang}")
+            raise BmError('script.language.unsupported', language=lang)
 
         # 2. 准备执行环境
         script_path = Path(entry)
         if not script_path.exists():
-            raise FileNotFoundError(f"脚本不存在: {entry}")
+            raise BmError('script.entry.missing', entry=str(entry))
 
         # 3. 构造基础命令
         config = self.configs[lang]
@@ -245,7 +249,7 @@ class ScriptRunner:
                 flags = CREATE_NO_WINDOW
             want_capture = False
         else:
-            raise ValueError(f'无效的终端模式: {terminal_mode}')
+            raise BmError('script.terminal.unsupported', mode=terminal_mode)
 
         # 2. 统一启动 → 跟踪 → 等待/捕获 → 收尾（所有分支都保证 untrack）
         key = next(self._proc_key_gen)
@@ -257,7 +261,7 @@ class ScriptRunner:
             )
         except Exception as e:
             BM_LOG.error(f'子进程启动失败: {e}')
-            raise RuntimeError(f'进程调度失败: {e}')
+            raise BmError('script.launch.failed') from e
 
         job = self._make_job(process)
         ScriptRunner.track_process(process, key, job)
@@ -267,15 +271,15 @@ class ScriptRunner:
                 out = self._smart_decode(stdout_bytes)
                 err = self._smart_decode(stderr_bytes)
                 if process.returncode != 0:
-                    raise RuntimeError(f'执行失败: {err}')
+                    raise BmError('script.launch.failed')
                 return True, out, err
             process.wait()
             return True, None, None
-        except RuntimeError:
+        except (RuntimeError, BmError):
             raise
         except Exception as e:
             BM_LOG.error(f'子进程启动失败: {e}')
-            raise RuntimeError(f'进程调度失败: {e}')
+            raise BmError('script.launch.failed') from e
         finally:
             ScriptRunner.untrack_process(key)
 
@@ -288,10 +292,10 @@ class ScriptRunner:
         entry, lang, version, _terminal = self.get_script_info(script_id)
         lang = lang.lower()
         if lang not in self.configs:
-            raise ValueError(f"不支持的语言: {lang}")
+            raise BmError('script.language.unsupported', language=lang)
         script_path = Path(entry)
         if not script_path.exists():
-            raise FileNotFoundError(f"脚本不存在: {entry}")
+            raise BmError('script.entry.missing', entry=str(entry))
 
         config = self.configs[lang]
         cmd = config['cmd_gen'](str(script_path), version)
