@@ -1,0 +1,63 @@
+# 不忙脚本盒子 · 脚本开发文档
+
+> 为不忙脚本盒子（bmscriptsbox）编写脚本的完整文档：TOML 配置、JSON 参数契约、七种语言的入口写法、
+> 触发方式、节点与脚本联动、AI 模型声明、打包与发布、常见报错排查。
+>
+> docVersion 0.3.0。若与 skill 内置摘要不一致，以本文档为准。
+
+读取方式：先按下面的分组找到对应页面，再取该页 URL 读全文。不要一次读完所有页面——
+大多数任务只需要 1~3 页。本地 HTTP API 的每个端点单独成页，在最后一组。
+
+## 教程：第一次接触从这里开始
+
+- [Python 脚本开发入门 - 5 分钟写出第一个脚本](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/quick-start.md)：不忙脚本盒子脚本开发快速上手——从零创建 Python 脚本、编写配置、安装到盒子并运行，跑通第一个脚本
+- [完整示例](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/examples.md)：6 个完整可运行的脚本示例（配置 + 代码），覆盖 5 种语言与联动场景，可直接复制作为起点。
+
+## 操作指南：完成一件具体的事
+
+- [Windows 右键菜单脚本 - 选中文件即可运行](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/context-menu.md)：脚本如何出现在文件资源管理器的右键菜单——context_menu 配置、targets 显示位置、filters 扩展名白名单与排查方法
+- [脚本全局快捷键配置 - 任意界面一键触发](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/hotkey.md)：脚本如何响应全局热键——shortcut 配置、input_type 获取内容类型、按键组合在热键管理页面设置
+- [超级复制触发](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/quick-copy.md)：脚本如何响应快速双击 Ctrl+C——quick_copy 配置、ClipboardMonitor 工作流程与适合的脚本类型
+- [Windows 定时任务脚本 - 声明式定时调度配置](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/scheduled-task.md)：不忙脚本盒子定时任务——设定参数后脚本在预设时间自动静默运行、无需人工干预；如何声明可配置参数、设静默终端模式、并给脚本完善的退出机制
+- [自动生成运行界面](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/auto-generated-ui.md)：不忙脚本盒子自动生成运行界面——声明 inputs 与 params，盒子自动生成设置界面，无需手写 GUI
+- [脚本联动](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/script-linking.md)：A 脚本如何调用 B 脚本（节点）组合出复合功能：依赖声明、传参、输出信封契约、错误码与防循环规则。
+- [模型管理](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/model-download.md)：在 TOML 里声明 repo_id，盒子安装时自动下载 AI 模型；涵盖双下载源、文件过滤规则与运行时取路径。
+- [工具托管](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/external-binaries.md)：脚本依赖 FFmpeg、7-Zip 等命令行工具时，在 TOML 里声明即可：盒子安装时自动下载并把可执行文件路径注入参数文件，也支持直接填 GitHub 下载链接。
+- [Python 脚本打包成 exe - 分发与安装指南](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/packaging-distribution.md)：不忙脚本盒子脚本打包与分发指南——ZIP 打包格式、智能覆盖安装、Git 分发、安装流程各步骤与失败回滚
+- [发布脚本到社区 - 让用户一键安装你的脚本](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/publish-community.md)：把脚本发布到社区市场的完整流程：准备公开仓库、填写发布信息、配置 Webhook，附发布前检查清单。
+
+## 参考：写配置和代码时对照
+
+- [TOML 脚本配置参考 - 参数、图标与运行环境](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/params.md)：不忙脚本盒子运行参数——[[bmscriptsbox.params]] 声明方式、字段参考、类型系统、各触发场景下的取值规则。
+- [参数注入](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/parameter-passing.md)：不忙脚本盒子脚本参数传递机制——JSON 参数文件三段契约（environment/data/params）、各字段说明（含外部工具路径注入）、多语言读取示例
+- [输入输出契约](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/io-contract.md)：不忙脚本盒子脚本输入输出契约——inputs 定义（name/type/exts/description）、outputs 输出键声明、联动回传信封格式与错误码
+- [环境配置](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/environment-config.md)：不忙脚本盒子环境配置——每种语言的运行方式、依赖文件、盒子安装流程与注入的环境变量。
+- [脚本目录结构规范](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/directory-structure.md)：脚本目录的标准结构与命名规范：入口文件与语言的对应表、配置路径规则、打包时的层级要求。
+- [多语言支持](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/multi-language.md)：不忙脚本盒子多语言支持——7 种语言支持列表、决策表、language 与 language_version 声明规则。
+- [声明式接入](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/declarative-access.md)：在 bm-scripts-box-rc.toml 里声明脚本的形态、触发方式与运行选项——每段配置字段、必填规则、校验错误对照表与真实案例。
+- [搜索触发](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/search-trigger.md)：不忙脚本盒子搜索触发——用 bmscriptsbox.triggers.search 让搜索框内容匹配脚本输入并推荐脚本。
+- [单实例与并发](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/single-instance.md)：不忙脚本盒子脚本并发策略——concurrency 的 single / forward 语义、GUI 单实例参数转发与盒子/脚本职责边界。
+- [终端模式详解](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/terminal-mode.md)：runtime.terminal 四种模式（静默 / 弹窗 / 智能 / 反转）的行为差异、输出捕获编码策略与各语言推荐设置。
+- [常见问题（开发指南）](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/faq.md)：脚本开发排障手册：调试与参数、编码、触发器联动、安装失败等六类常见问题的原因和解决办法。
+
+## 原理：搞清楚为什么这么设计
+
+- [脚本运行机制](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/run-mechanism.md)：不忙脚本盒子脚本运行机制——TOML 声明脚本、JSON 传参与回传，三段式流水如何把脚本跑起来。
+- [脚本开发原则](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/dev-principles.md)：脚本好用、好维护的开发原则：单一职责、交互选型与错误处理、依赖与安全合规。
+- [直接启动](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/start-directly.md)：从盒子窗口点击脚本卡片即可启动脚本——该方式恒定可用、无需声明；未配置运行界面时 data 恒为空。
+- [节点](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/node.md)：不忙脚本盒子节点机制——什么脚本该声明为节点、怎么声明、如何识别被调用、声明何时生效
+- [工作流](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/workflow.md)：不忙脚本盒子工作流说明——多脚本串联现通过「脚本联动」实现（代码里调 /api/link），声明式编排为未来计划
+- [脚本开发指南 - Python / PowerShell 脚本接入](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/index.md)：不忙脚本盒子脚本开发总览——7 项能力对应哪篇文档、按任务选读的索引表。
+
+## 本地 HTTP API（127.0.0.1:9527）
+
+- [HTTP API](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/http-api/index.md)：盒子本地 HTTP 服务（127.0.0.1:9527）的 5 个接口一览，覆盖触发脚本、串联调用、查模型路径与发送通知。
+- [执行脚本 · /api/execute](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/http-api/execute.md)：POST /api/execute 触发任意脚本执行——结构化调用与 temp_file 旧触发流，支持同步返回结果与异步触发
+- [健康检查 · /api/health](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/http-api/health.md)：GET /api/health 检测盒子 HTTP 服务是否正常运行
+- [联动调用 · /api/link](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/http-api/link.md)：POST /api/link 脚本串联——A 调 B（节点），恒为同步拿回结果，含节点门禁与错误响应
+- [查询模型路径 · /api/model/path](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/http-api/model-path.md)：GET /api/model/path 根据 repo_id 查询本地已下载模型的文件夹路径
+- [发送通知 · /api/notify](https://raw.githubusercontent.com/bm-qihengzhi/BmScriptsBox/main/docs/Developer/http-api/notify.md)：POST /api/notify 向用户发送桌面气泡通知——请求参数、headers、curl 与脚本内调用示例
+
+## 索引之外
+
+- 完整配置字段、校验错误原文、各语言示例散落在上述页面中；本文档不提供全文合集版本，按需取页。
