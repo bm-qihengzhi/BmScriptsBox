@@ -19,7 +19,9 @@ from .context_model import ContextModel
 class MenuPresenter(QObject):
     """右键菜单逻辑处理器"""
 
-    data_loaded = Signal(list, dict)
+    # dict 会被转成 QVariantMap（键变字符串），level_map 的 int 键会全部失配，
+    # 所以这里必须用 object 保持原样传递
+    data_loaded = Signal(list, object)
     notification = Signal(str, str)
     show_context_menu = Signal(object, dict)
     action_completed = Signal(str, bool, str)

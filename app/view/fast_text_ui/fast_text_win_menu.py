@@ -4,6 +4,9 @@ Email: bmscriptsbox@163.com
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: LicenseRef-Commons-Clause
 """
+import ctypes
+from ctypes import wintypes
+
 from pynput import mouse
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QCursor
@@ -27,6 +30,7 @@ class FastTextMenu(XDialog):
         self.mouse_listener = None
         self.is_listening = False
         self._clipboard_text = ""
+        self._hwnd = 0      # 原生窗口句柄，用于物理像素命中判断
         self.setWindowFlag(Qt.WindowStaysOnTopHint, True)  # 设置窗口永远在最上层
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self._setup_ui()
@@ -147,6 +151,8 @@ class FastTextMenu(XDialog):
     def showEvent(self, event):
         """窗口显示时启动鼠标监听"""
         super().showEvent(event)
+        # 句柄在 GUI 线程取好再缓存：pynput 回调在监听线程，不能在那里调 winId()
+        self._hwnd = int(self.winId())
         self.start_mouse_listener()
 
     def hideEvent(self, event):
@@ -186,11 +192,30 @@ class FastTextMenu(XDialog):
 
         self.is_listening = False
 
+    def _hit_window(self, x: int, y: int) -> bool:
+        """物理像素坐标是否落在窗口矩形内。
+
+        pynput 给的是物理像素，而 Qt 的 frameGeometry() 是逻辑像素，缩放屏上
+        两者差 devicePixelRatio 倍，直接把物理坐标喂给 frameGeometry 会把
+        "点在面板上"判成"点在外面"。这里改用 Win32 GetWindowRect（同样是物理
+        像素）比较。取不到矩形时按"在内部"处理，宁可让用户再点一次，也不误关。
+        """
+        if not self._hwnd:
+            return True
+        rect = wintypes.RECT()
+        try:
+            if not ctypes.windll.user32.GetWindowRect(
+                    self._hwnd, ctypes.byref(rect)):
+                return True
+        except Exception:
+            return True
+        return rect.left <= x <= rect.right and rect.top <= y <= rect.bottom
+
     def on_click(self, x, y, button, pressed):
         """鼠标点击回调函数"""
         if pressed and button == mouse.Button.left:
-            # 检查点击位置是否在widget外部（含窗口边框，避免坐标错位）
-            if not self.frameGeometry().contains(x, y):
+            # 检查点击位置是否在窗口外部（统一用物理像素，避开 DPI 缩放）
+            if not self._hit_window(x, y):
                 # 通过信号触发隐藏，确保在UI线程中执行
                 if self.mouse_signals:
                     self.mouse_signals.click_outside.emit()

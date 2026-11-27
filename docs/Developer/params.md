@@ -1,6 +1,6 @@
 ---
 title: TOML 脚本配置参考 - 参数、图标与运行环境
-description: 不忙脚本盒子运行参数——[[bmscriptsbox.params]] 声明方式、字段参考、类型系统、各触发场景下的取值规则。
+description: 不忙盒子运行参数——[[bmscriptsbox.params]] 声明方式、字段参考、类型系统、各触发场景下的取值规则。
 status: 稳定
 docType: reference
 audience: 脚本开发者

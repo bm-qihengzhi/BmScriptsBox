@@ -28,7 +28,9 @@ _KIND_LABEL = {
     "tool": ("Tool", "neutral"),
     "command": ("Command", "neutral"),
     "calculator": ("Calculator", "error"),
-    "script_input": ("Input", "info"),
+    # 带参匹配本质仍是"某个脚本 + 带入了查询内容"，副标题已写明是哪种输入，
+    # 类型徽章继续用「脚本」，避免同一脚本按名字/按参数搜到时时徽章不一致
+    "script_input": ("Script", "primary"),
     "market_script": ("Market", "primary"),
 }
 _DEFAULT_KIND_COLOR = "neutral"

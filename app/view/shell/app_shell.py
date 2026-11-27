@@ -340,10 +340,32 @@ class ApplicationShell(QObject):
 
     def _on_activate_search(self):
         modal = QApplication.activeModalWidget()
-        if modal is not None:
+        if modal is not None and modal.isVisible():
+            # 参数表单是"脚本等你填参数"的临时模态，可以被唤醒手势安全取消；
+            # 否则它会把双击 Ctrl 永久吃掉（表单在后台/被遮住时表现为"唤不出来"）
+            if self._dismiss_pick_modal(modal):
+                self.show_launcher()
+                return
             self.bring_to_front(modal)
             return
+        # 不可见的模态（父窗口已隐藏等）不再拦截唤醒
         self.show_launcher()
+
+    @staticmethod
+    def _dismiss_pick_modal(modal) -> bool:
+        """只取消参数表单这类可安全放弃的模态；其它（安装、确认）仍提到最前。"""
+        try:
+            from app.view.script_ui.params_prompt_dialog import ParamsPromptDialog
+        except Exception:
+            return False
+        if not isinstance(modal, ParamsPromptDialog):
+            return False
+        try:
+            modal.reject()
+            return True
+        except Exception as exc:
+            BM_LOG.warning(f"取消参数表单失败: {exc}")
+            return False
 
     def _on_show_window(self):
         if self.config.isVisible():

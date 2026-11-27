@@ -1,6 +1,6 @@
 ---
 title: Python 脚本打包成 exe - 分发与安装指南
-description: 不忙脚本盒子脚本打包与分发指南——ZIP 打包格式、智能覆盖安装、Git 分发、安装流程各步骤与失败回滚
+description: 不忙盒子脚本打包与分发指南——ZIP 打包格式、智能覆盖安装、Git 分发、安装流程各步骤与失败回滚
 status: 稳定
 docType: how-to
 audience: 脚本开发者

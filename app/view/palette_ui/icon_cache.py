@@ -7,6 +7,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 命令面板图标缓存：UI 只读内存/磁盘，桌面应用图标由后台 worker 提取。
 """
 import hashlib
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -61,9 +62,13 @@ _GENERIC_ICON = {
 class IconCache(QObject):
     icon_ready = Signal(str)
 
+    # 内存里最多保留多少张已加载图标；超出按 LRU 淘汰，淘汰后再次访问会
+    # 重新从图片/磁盘缓存读取（必要时重新入队提取），显示行为不变
+    CACHE_LIMIT = 300
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._cache: Dict[str, QPixmap] = {}
+        self._cache: "OrderedDict[str, QPixmap]" = OrderedDict()
         self._generic: Dict[str, QPixmap] = {}
         self._queue: List[tuple] = []
         self._queued = set()
@@ -82,22 +87,24 @@ class IconCache(QObject):
                 key = self._file_key("image", path, suffix)
                 cached = self._cache.get(key)
                 if cached is not None:
+                    self._cache.move_to_end(key)
                     return cached
                 pixmap = _icon_pixmap(path)
                 if not pixmap.isNull():
-                    self._cache[key] = pixmap
+                    self._remember(key, pixmap)
                     return pixmap
             else:
                 key = self._file_key("shell", path, suffix)
                 cached = self._cache.get(key)
                 if cached is not None:
+                    self._cache.move_to_end(key)
                     return cached
                 disk = self._disk_path(key)
                 if disk.exists():
                     pixmap = QPixmap(str(disk))
                     if not pixmap.isNull():
                         pixmap = _fit_pixmap(pixmap)
-                        self._cache[key] = pixmap
+                        self._remember(key, pixmap)
                         return pixmap
                 if key not in self._failed:
                     self._enqueue(path, key)
@@ -133,6 +140,13 @@ class IconCache(QObject):
                 continue
             self._enqueue(path, key)
         self._start_worker()
+
+    def _remember(self, key: str, pixmap: QPixmap):
+        """写入内存缓存并按 LRU 淘汰最久未用的条目"""
+        self._cache[key] = pixmap
+        self._cache.move_to_end(key)
+        while len(self._cache) > self.CACHE_LIMIT:
+            self._cache.popitem(last=False)
 
     def _generic_pixmap(self, icon_name):
         key = self._theme_key(icon_name)

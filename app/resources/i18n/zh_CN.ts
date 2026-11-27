@@ -376,7 +376,7 @@
     <message>
         <location filename="view/setting_ui/about_win.py" line="28"/>
         <source>BmScriptsBox</source>
-        <translation type="unfinished">不忙脚本盒子</translation>
+        <translation type="unfinished">不忙盒子</translation>
     </message>
     <message>
         <location filename="view/index_ui/index_win_disp.py" line="111"/>
@@ -401,7 +401,7 @@
     <message>
         <location filename="view/index_ui/index_win_disp.py" line="171"/>
         <source>BmScripts</source>
-        <translation type="unfinished">不忙脚本盒子</translation>
+        <translation type="unfinished">不忙盒子</translation>
     </message>
     <message>
         <location filename="view/setting_ui/setting_win_disp.py" line="180"/>
@@ -1056,7 +1056,7 @@
 
     <message>
         <source>BmScriptsBox Config Center</source>
-        <translation>不忙脚本盒子-配置中心</translation>
+        <translation>不忙盒子-配置中心</translation>
     </message>
     <message>
         <source>Page load failed</source>
@@ -1244,7 +1244,7 @@
     </message>
     <message>
         <source>BmScriptsBox · Superpowers for your PC</source>
-        <translation>不忙脚本盒子 · 给电脑装上超能力</translation>
+        <translation>不忙盒子 · 随手可用的效率工具箱</translation>
     </message>
     <message>
         <source>↑↓ Select · Enter Run</source>
@@ -1648,7 +1648,7 @@
     </message>
     <message>
         <source>This is a test message from BmScriptsBox</source>
-        <translation>这是一条来自不忙脚本盒子的测试消息</translation>
+        <translation>这是一条来自不忙盒子的测试消息</translation>
     </message>
     <message>
         <source>Unknown reason, see BmLogs/BmLogs.log</source>
@@ -1828,7 +1828,7 @@
     </message>
     <message>
         <source>BmScriptsBox is running in the system tray</source>
-        <translation>不忙脚本盒子已启动在系统托盘</translation>
+        <translation>不忙盒子已启动在系统托盘</translation>
     </message>
     <message>
         <source>WeChat push login expired, please scan again on the Push page</source>
@@ -2649,6 +2649,146 @@
         <location filename="view/scheduled_ui/scheduled_win_disp.py"/>
         <source>WeChat push</source>
         <translation>微信推送</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Installed successfully in %1s</source>
+        <translation>安装成功！耗时 %1s</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Dependency %1 already installed, skipped</source>
+        <translation>依赖脚本 %1 已安装，跳过</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>%1 requires dependency %2, installing ...</source>
+        <translation>%1 脚本需要依赖 %2，正在安装 ...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Dependency %1 installed</source>
+        <translation>依赖脚本 %1 安装完成</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Downloading script...</source>
+        <translation>开始下载脚本...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Script downloaded</source>
+        <translation>脚本下载完成...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Installation interrupted, cleaning up leftovers...</source>
+        <translation>安装中断，正在清理残留资源...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Leftover resources cleaned up</source>
+        <translation>残留资源清理完毕</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Leftover data detected, cleaning up...</source>
+        <translation>检测到上次残留数据，正在清理...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Script directory initialized</source>
+        <translation>初始化脚本目录完成</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Archive extracted</source>
+        <translation>解压包文件完成</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Syncing webview...</source>
+        <translation>同步 webview...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Normalizing line endings to CRLF...</source>
+        <translation>统一换行符为 CRLF 格式...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Syncing pwsh...</source>
+        <translation>同步 pwsh...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Syncing external binaries...</source>
+        <translation>同步外部二进制资源...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Syncing AI model resources...</source>
+        <translation>同步 AI 模型资源...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Model download may take about 60 seconds...</source>
+        <translation>模型下载预计需要 60 秒...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Registering system components...</source>
+        <translation>正在注册系统组件...</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Network proxy error, check the system proxy settings</source>
+        <translation>网络代理异常，请检查系统代理设置</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Request timed out, please try again later</source>
+        <translation>请求超时，请稍后重试</translation>
+    </message>
+    <message>
+        <location filename="servers/scripts/script_install.py"/>
+        <source>Installation interrupted unexpectedly: %1</source>
+        <translation>安装意外中断: %1</translation>
+    </message>
+    <message>
+        <location filename="servers/packages/download.py"/>
+        <source>Downloading from %1 sources ...</source>
+        <translation>正在从 %1 个源下载 ...</translation>
+    </message>
+    <message>
+        <location filename="servers/packages/download.py"/>
+        <source>Progress: %1% | %2 | %3 / %4</source>
+        <translation>进度: %1% | %2 | %3 / %4</translation>
+    </message>
+    <message>
+        <location filename="servers/packages/download.py"/>
+        <source>Downloaded: %1 | %2</source>
+        <translation>已下载: %1 | %2</translation>
+    </message>
+    <message>
+        <location filename="view/update_ui/update_win_disp.py"/>
+        <source>Downloading update</source>
+        <translation>正在下载更新</translation>
+    </message>
+    <message>
+        <location filename="view/update_ui/update_win_disp.py"/>
+        <source>Downloading %1 files. The app will restart automatically when done</source>
+        <translation>正在下载 %1 个文件，完成后会自动重启</translation>
+    </message>
+    <message>
+        <location filename="view/update_ui/update_win_disp.py"/>
+        <source>Please do not close the app during the download</source>
+        <translation>下载过程中请勿关闭程序</translation>
+    </message>
+    <message>
+        <location filename="view/update_ui/update_win_disp.py"/>
+        <source>Download failed. Please check the network and try again later.</source>
+        <translation>下载失败，请检查网络后重试</translation>
     </message>
 </context>
 </TS>

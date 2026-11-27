@@ -258,17 +258,24 @@ class InstallScriptWindow(XDialog):
         安装进度回调
         期待格式: {'status': True, 'msg': '...', 'level': 'STAGE'}
         """
-        msg = progress.get('msg', '')
+        # 进度文案由安装器以英文 source 发出，这里统一查表后再判定级别，
+        # 中英文界面都能落到同样的 SUCCESS / STAGE / ERROR
+        msg = XI18N.x_tr(progress.get('msg', ''))
+        lowered = msg.lower()
 
-        # 智能判定 Level (如果你在 Work 类里没传 level)
         level = "INFO"
-        if "完成" in msg or "成功" in msg or "Downloaded" in msg:
+        if any(k in msg for k in ("完成", "成功")) or any(
+                k in lowered for k in ("completed", "success", "installed",
+                                       "extracted", "cleaned up")):
             level = "SUCCESS"
-        elif "开始" in msg or "正在" in msg:
+        elif any(k in msg for k in ("开始", "正在")) or any(
+                k in lowered for k in ("starting", "syncing", "registering",
+                                       "normalizing")):
             level = "STAGE"
-        elif "进度:" in msg or "Downloading" in msg or "Progress" in msg:
+        elif "进度:" in msg or any(
+                k in lowered for k in ("downloading", "progress", "%")):
             level = "DOWNLOADING"
-        elif "失败" in msg:
+        elif "失败" in msg or any(k in lowered for k in ("failed", "error")):
             level = "ERROR"
 
         self.append_styled_log(msg, level)

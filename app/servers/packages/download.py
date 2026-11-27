@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from PySide6.QtCore import QObject, Signal, Slot
+from xsideui import XI18N
 
 from app.data import ProjectGlobal
 from app.utils import BmError, BM_LOG
@@ -123,7 +124,9 @@ class XDownLoad(QObject):
 
         self.download_progress.emit({
             'status': True,
-            'msg': f"正在从 {len(sources)} 个源下载 ..."
+            'kind': 'sources',
+            'sources': len(sources),
+            'msg': XI18N.x_tr("Downloading from %1 sources ...").replace("%1", str(len(sources))),
         })
 
         cmd = [
@@ -154,6 +157,7 @@ class XDownLoad(QObject):
         last_emit_time = 0.0
         slow_since = None
         done_bytes = 0  # MUDL 上报的完成字节数，用于退出码异常时的产物完整性校验
+        early_done = False  # 产物已完整、主动结束进程
         try:
             for line in proc.stdout:
                 line = line.strip()
@@ -190,13 +194,37 @@ class XDownLoad(QObject):
                     if now - last_emit_time >= self.PROGRESS_INTERVAL:
                         self._emit_from_event(evt)
                         last_emit_time = now
+
+                    # 字节已收满且产物大小对得上就收工：MUDL 往往在 100% 之后还要等
+                    # 连接收尾（TLS 等）到 --timeout 才发 done，小文件白等十几秒
+                    if (total > 0 and downloaded >= total
+                            and self._artifact_complete(save_path, total)):
+                        BM_LOG.info(
+                            f"[MUDL] 进度已 100%（{total} 字节）且产物完整，提前结束进程")
+                        done_bytes = total
+                        early_done = True
+                        proc.terminate()
+                        break
                 elif evt.get('s') == 'done':
                     done_bytes = evt.get('dl', 0) or 0
                     last_log = f"完成 {done_bytes} 字节"
+                    # 产物已按上报字节数落盘：立刻结束进程，不再等 MUDL 的连接收尾超时
+                    # （直连 GitHub 时一个小 zip 下完还要白等满 --timeout 才退出）
+                    if self._artifact_complete(save_path, done_bytes):
+                        BM_LOG.info(
+                            f"[MUDL] 已收到 done 且产物完整（{done_bytes} 字节），提前结束进程")
+                        early_done = True
+                        proc.terminate()
+                        break
         finally:
             self._proc = None
 
         returncode = proc.wait()
+
+        # 我们主动结束的进程退出码没有参考价值，产物大小已在结束前校验过
+        if early_done:
+            self.download_finished.emit(str(save_path))
+            return str(save_path)
 
         # 产物完整性优先于退出码：
         # MUDL 在多余连接超时/TLS 异常时会把退出码置为非 0，但目标文件其实已经完整落盘
@@ -251,12 +279,25 @@ class XDownLoad(QObject):
 
         if total > 0:
             perc = evt.get('p', 0.0)
-            msg = (f"进度: {perc:.1f}% | 速度: {self._fmt_speed(speed)} | "
-                   f"({self._fmt_size(downloaded)} / {self._fmt_size(total)})")
+            msg = (XI18N.x_tr("Progress: %1% | %2 | %3 / %4")
+                   .replace("%1", f"{perc:.1f}")
+                   .replace("%2", self._fmt_speed(speed))
+                   .replace("%3", self._fmt_size(downloaded))
+                   .replace("%4", self._fmt_size(total)))
         else:
-            msg = f"已下载: {self._fmt_size(downloaded)} | 速度: {self._fmt_speed(speed)}"
+            msg = (XI18N.x_tr("Downloaded: %1 | %2")
+                   .replace("%1", self._fmt_size(downloaded))
+                   .replace("%2", self._fmt_speed(speed)))
 
-        self.download_progress.emit({'status': True, 'msg': msg})
+        self.download_progress.emit({
+            'status': True,
+            'kind': 'progress',
+            'p': evt.get('p', 0.0),
+            'sp': speed,
+            'dl': downloaded,
+            'sz': total,
+            'msg': msg,
+        })
 
     @staticmethod
     def _fmt_speed(speed) -> str:
@@ -266,6 +307,9 @@ class XDownLoad(QObject):
 
     @staticmethod
     def _fmt_size(size) -> str:
+        """小文件用 KB，避免 351 字节显示成 0.0MB"""
+        if size < 1024 * 1024:
+            return f"{size / 1024:.1f}KB"
         return f"{size / 1024 / 1024:.1f}MB"
 
     @staticmethod

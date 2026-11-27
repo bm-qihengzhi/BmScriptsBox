@@ -1,6 +1,6 @@
 ---
 title: 搜索触发
-description: 不忙脚本盒子搜索触发——用 bmscriptsbox.triggers.search 让搜索框内容匹配脚本输入并推荐脚本。
+description: 不忙盒子搜索触发——用 bmscriptsbox.triggers.search 让搜索框内容匹配脚本输入并推荐脚本。
 status: 稳定
 docType: reference
 audience: 脚本开发者

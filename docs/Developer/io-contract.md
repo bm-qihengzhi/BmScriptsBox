@@ -1,6 +1,6 @@
 ---
 title: 输入输出契约
-description: 不忙脚本盒子脚本输入输出契约——inputs 定义（name/type/exts/description）、outputs 输出键声明、联动回传信封格式与错误码
+description: 不忙盒子脚本输入输出契约——inputs 定义（name/type/exts/description）、outputs 输出键声明、联动回传信封格式与错误码
 status: 稳定
 docType: reference
 audience: 脚本开发者

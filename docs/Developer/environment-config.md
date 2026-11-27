@@ -1,6 +1,6 @@
 ---
 title: 环境配置
-description: 不忙脚本盒子环境配置——每种语言的运行方式、依赖文件、盒子安装流程与注入的环境变量。
+description: 不忙盒子环境配置——每种语言的运行方式、依赖文件、盒子安装流程与注入的环境变量。
 status: 稳定
 docType: reference
 audience: 脚本开发者

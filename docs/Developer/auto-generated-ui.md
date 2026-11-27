@@ -1,6 +1,6 @@
 ---
 title: 自动生成运行界面
-description: 不忙脚本盒子自动生成运行界面——声明 inputs 与 params，盒子自动生成设置界面，无需手写 GUI
+description: 不忙盒子自动生成运行界面——声明 inputs 与 params，盒子自动生成设置界面，无需手写 GUI
 status: 稳定
 docType: how-to
 audience: 脚本开发者

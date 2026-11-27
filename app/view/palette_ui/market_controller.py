@@ -6,6 +6,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 
 搜索面板的市场推荐适配：MarketCatalogService → SearchItem。
 """
+import unicodedata
 from typing import Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import QObject
@@ -13,20 +14,67 @@ from PySide6.QtCore import QObject
 from xsideui import tr
 
 from app.servers.launcher.models import SearchItem
+from app.servers.launcher.text_score import compact
 from app.utils import BM_LOG, BmTools
 
 
-def has_strong_local_result(items) -> bool:
-    """本地是否有明确能处理该输入的脚本（直接脚本或高置信输入匹配）。"""
+def _starts_word(value: str, index: int) -> bool:
+    """查询词在原文里的起点是否为"词首"（前一个字符不是字母/数字）。"""
+    return index == 0 or not value[index - 1].isalnum()
+
+
+def _loose(text) -> str:
+    """保留空格的小写形式，用于判断英文词边界（normalize 会删掉空白）。"""
+    return unicodedata.normalize("NFKC", str(text or "")).lower()
+
+
+def _title_matches(item, query_raw: str, query_compact: str) -> bool:
+    """标题或关键词是否"明确"命中查询：完全相等或以查询开头。
+
+    中段/结尾的子串（「视频格式转换」里的"转换""格式"）属于泛词命中，
+    不算明确答案，交给市场补推荐。英文额外认词首：rename 命中 Batch Rename。
+    """
+    if not query_compact:
+        return False
+    fields = [(getattr(item, "title", "") or "",
+               getattr(item, "compact_title", "") or "")]
+    fields.extend(zip(getattr(item, "keywords", None) or (),
+                      getattr(item, "compact_keywords", None) or ()))
+    for raw, compact_value in fields:
+        if not compact_value:
+            continue
+        if compact_value == query_compact or compact_value.startswith(query_compact):
+            return True
+        if raw and query_raw:
+            text = _loose(raw)
+            index = text.find(query_raw)
+            if index >= 0 and _starts_word(text, index):
+                return True
+    return False
+
+
+def has_strong_local_result(query: str, items) -> bool:
+    """本地是否有明确能处理该输入的脚本（直接脚本或高置信输入匹配）。
+
+    脚本只有标题/关键词"等于或以其开头"才算明确；仅在名字中段/结尾
+    出现（装了「视频格式转换」搜"转换""格式"）属于弱命中，不压市场推荐。
+    """
+    query_raw = _loose(query).strip()
+    query_compact = compact(query)
     for item in items or []:
         kind = getattr(item, "kind", "")
         if kind == "script":
-            return True
-        if kind == "script_input":
+            if _title_matches(item, query_raw, query_compact):
+                return True
+        elif kind == "script_input":
             payload = getattr(item, "payload", None)
             if isinstance(payload, dict):
                 confidence = str(payload.get("confidence") or "").lower()
-                if confidence == "high":
+                matched_kind = str(payload.get("matched_kind") or "").lower()
+                # 通用文本匹配（text）任何输入都能命中，哪怕标了 high 也不代表
+                # "找到了明确答案"——否则装了 Everything 之类的文本脚本，
+                # 搜什么都会被它压掉市场推荐
+                if confidence == "high" and matched_kind != "text":
                     return True
     return False
 
@@ -34,7 +82,7 @@ def has_strong_local_result(items) -> bool:
 def should_recommend(query: str, items) -> bool:
     """本地没有明确脚本时推荐市场；单字中文也允许（本地索引，无网络成本）。"""
     query = str(query or "").strip()
-    if not query or has_strong_local_result(items):
+    if not query or has_strong_local_result(query, items):
         return False
     if len(query) >= 2:
         return True

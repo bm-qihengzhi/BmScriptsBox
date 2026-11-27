@@ -1,6 +1,6 @@
 ---
 title: 节点
-description: 不忙脚本盒子节点机制——什么脚本该声明为节点、怎么声明、如何识别被调用、声明何时生效
+description: 不忙盒子节点机制——什么脚本该声明为节点、怎么声明、如何识别被调用、声明何时生效
 status: 稳定
 docType: explanation
 audience: 脚本开发者

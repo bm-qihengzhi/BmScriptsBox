@@ -1,6 +1,6 @@
 ---
 title: Python 脚本开发入门 - 5 分钟写出第一个脚本
-description: 不忙脚本盒子脚本开发快速上手——从零创建 Python 脚本、编写配置、安装到盒子并运行，跑通第一个脚本
+description: 不忙盒子脚本开发快速上手——从零创建 Python 脚本、编写配置、安装到盒子并运行，跑通第一个脚本
 status: 稳定
 docType: tutorial
 audience: 脚本开发者

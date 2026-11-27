@@ -1,6 +1,6 @@
 ---
 title: 工作流
-description: 不忙脚本盒子工作流说明——多脚本串联现通过「脚本联动」实现（代码里调 /api/link），声明式编排为未来计划
+description: 不忙盒子工作流说明——多脚本串联现通过「脚本联动」实现（代码里调 /api/link），声明式编排为未来计划
 status: 未实现
 docType: explanation
 audience: 脚本开发者

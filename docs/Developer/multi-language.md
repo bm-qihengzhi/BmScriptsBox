@@ -1,6 +1,6 @@
 ---
 title: 多语言支持
-description: 不忙脚本盒子多语言支持——7 种语言支持列表、决策表、language 与 language_version 声明规则。
+description: 不忙盒子多语言支持——7 种语言支持列表、决策表、language 与 language_version 声明规则。
 status: 稳定
 docType: reference
 audience: 脚本开发者

@@ -1,6 +1,6 @@
 ---
 title: 单实例与并发
-description: 不忙脚本盒子脚本并发策略——concurrency 的 single / forward 语义、GUI 单实例参数转发与盒子/脚本职责边界。
+description: 不忙盒子脚本并发策略——concurrency 的 single / forward 语义、GUI 单实例参数转发与盒子/脚本职责边界。
 status: 稳定
 docType: reference
 audience: 脚本开发者

@@ -1,6 +1,6 @@
 ---
 title: 脚本开发指南 - Python / PowerShell 脚本接入
-description: 不忙脚本盒子脚本开发总览——7 项能力对应哪篇文档、按任务选读的索引表。
+description: 不忙盒子脚本开发总览——7 项能力对应哪篇文档、按任务选读的索引表。
 status: 稳定
 docType: explanation
 audience: 脚本开发者
@@ -11,7 +11,7 @@ docVersion: 0.3.0
 
 > **声明脚本的形态、触发方式与参数。盒子负责环境、触发、界面、协作与分发——脚本逻辑之外的部分不需要手写。**
 
-不忙脚本盒子是一款 Windows 跨语言脚本管理软件，支持 Python、Node.js、PowerShell、AutoHotkey、BAT、HTML、EXE 七种脚本形态。它负责脚本运行环境、依赖、触发入口与分发。脚本因此装好就能跑、右键就能用、能定时、能协作、能发布。
+不忙盒子是一款 Windows 跨语言脚本管理软件，支持 Python、Node.js、PowerShell、AutoHotkey、BAT、HTML、EXE 七种脚本形态。它负责脚本运行环境、依赖、触发入口与分发。脚本因此装好就能跑、右键就能用、能定时、能协作、能发布。
 
 ---
 
@@ -71,7 +71,7 @@ python main.py "C:/Users/xxx/AppData/Local/Temp/a1b2c3d4.json"
 
 盒子遵循**声明式接入**：只需要一个 `bm-scripts-box-rc.toml` 文件，用纯文本声明"脚本叫什么、用什么语言写、在哪里触发"。剩下的交给盒子。
 
-| 维度 | 传统 SDK / 插件方式 | 不忙脚本盒子（声明式接入） |
+| 维度 | 传统 SDK / 插件方式 | 不忙盒子（声明式接入） |
 | --- | --- | --- |
 | 代码侵入 | 需要 import sdk、继承基类、实现固定接口 | 零侵入，原生脚本，无需任何改动 |
 | 学习成本 | 需要学习 SDK 的 API 规范 | 会写脚本就会用 |

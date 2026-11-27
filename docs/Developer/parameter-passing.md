@@ -1,6 +1,6 @@
 ---
 title: 参数注入
-description: 不忙脚本盒子脚本参数传递机制——JSON 参数文件三段契约（environment/data/params）、各字段说明（含外部工具路径注入）、多语言读取示例
+description: 不忙盒子脚本参数传递机制——JSON 参数文件三段契约（environment/data/params）、各字段说明（含外部工具路径注入）、多语言读取示例
 status: 稳定
 docType: reference
 audience: 脚本开发者

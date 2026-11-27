@@ -9,11 +9,12 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import webbrowser
 
 from PySide6.QtCore import QTimer, Signal, QPoint, QRect, Qt
+from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QApplication,
                                QStackedWidget, QFrame)
 from app.utils import BmTools
 from xsideui import (XLabel, XPushButton, XProgressBar, XButtonVariant, XSize,
-                     tr, XDialog, XColor, XScrollArea)
+                     tr, XI18N, XDialog, XColor, XScrollArea, XCard, theme_manager)
 
 try:
     from app.cloud.works import UpdateDownLoadTask
@@ -22,9 +23,42 @@ except ImportError:
 
 
 
+class _ScrollFade(QWidget):
+    """滚动区底部渐隐，避免固定高度把文字硬切成半行"""
+
+    HEIGHT = 16
+
+    def __init__(self, scroll):
+        super().__init__(scroll)
+        self._scroll = scroll
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        scroll.verticalScrollBar().valueChanged.connect(self.sync)
+        scroll.verticalScrollBar().rangeChanged.connect(self.sync)
+        self.hide()
+
+    def sync(self, *_):
+        bar = self._scroll.verticalScrollBar()
+        visible = bar.maximum() > 0 and bar.value() < bar.maximum()
+        self.setGeometry(0, self._scroll.height() - self.HEIGHT,
+                         self._scroll.width(), self.HEIGHT)
+        self.setVisible(visible)
+        if visible:
+            self.raise_()
+
+    def paintEvent(self, event):
+        base = theme_manager.semantic_qcolor("bg.surface")
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0.0, QColor(base.red(), base.green(), base.blue(), 0))
+        gradient.setColorAt(1.0, base)
+        QPainter(self).fillRect(self.rect(), gradient)
+
+
 class UpdateWidget(XDialog):
     """软件更新小部件"""
     completed_single = Signal(str)
+
+    NOTES_HEIGHT = 180      # 更新内容区固定高度，避免不同版本把弹窗撑成不同高度
+    PROGRESS_HEIGHT = 22    # 进度条高度，16px 在宽弹窗里太细
 
     def __init__(self, version: str, diff: list, remote_details: dict = None,
                  changelog=None, local_version: str = None, removed: list = None,
@@ -36,6 +70,7 @@ class UpdateWidget(XDialog):
         self._local_version = local_version
         self._removed = list(removed or [])
         self._summary, self._groups = self._normalize_changelog(changelog)
+        self._downloading = False
         self._notes_url = ""
         if isinstance(changelog, dict):
             url = changelog.get("url")
@@ -103,6 +138,7 @@ class UpdateWidget(XDialog):
         self.update_tails()
         self.stack.setCurrentIndex(0)
         self._single()
+        self._sync_page_heights()
 
         self.setModal(False)
         self.setWindowModality(Qt.NonModal)
@@ -110,6 +146,7 @@ class UpdateWidget(XDialog):
     def showEvent(self, event):
         """窗口显示事件"""
         super().showEvent(event)
+        self._sync_page_heights()
         if self.parent() and not hasattr(self, '_positioned'):
             self._position_at_parent_bottom_right()
 
@@ -139,6 +176,23 @@ class UpdateWidget(XDialog):
             widget = self.stack.widget(i)
             widget.adjustSize()
             widget.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        fade = getattr(self, '_notes_fade', None)
+        if fade is not None:
+            fade.sync()
+
+    def _sync_page_heights(self):
+        """两页等高：切换时不跳高度，进度条也不会漂在空荡的高弹窗里"""
+        prompt = self.stack.widget(0)
+        tails = self.stack.widget(1)
+        if prompt is None or tails is None:
+            return
+        prompt.adjustSize()
+        height = prompt.sizeHint().height()
+        if height > 0:
+            tails.setFixedHeight(height)
 
     def update_prompt(self):
         content_widget = QWidget()
@@ -171,15 +225,8 @@ class UpdateWidget(XDialog):
         self.stack.addWidget(content_widget)
 
     def _build_notes_section(self, layout: QVBoxLayout):
-        """版本行 + 概述 + 分组条目（可滚动） + 完整说明链接"""
-        version_text = (f"{self._local_version} → {self.version}"
-                        if self._local_version and self.version
-                        else str(self.version or ""))
-        if version_text:
-            layout.addWidget(XLabel(version_text, style=XLabel.Style.SECONDARY))
-
-        if self._summary:
-            layout.addWidget(XLabel(self._summary, word_wrap=True))
+        """标题 + 分组条目（固定高度） + 完整说明链接"""
+        layout.addWidget(XLabel(tr('New Version Available'), style=XLabel.Style.H3))
 
         if self._groups:
             layout.addWidget(self._build_groups_area())
@@ -195,7 +242,7 @@ class UpdateWidget(XDialog):
             layout.addWidget(link)
 
     def _build_groups_area(self) -> QWidget:
-        """把分组条目塞进固定最大高度的滚动区，内容再多也不撑破窗口"""
+        """分组条目放在固定高度的滚动区：内容多少都不改变弹窗高度"""
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
         inner_layout.setContentsMargins(0, 0, 0, 0)
@@ -213,21 +260,59 @@ class UpdateWidget(XDialog):
         scroll.set_scrollbar_visible(True, False)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(inner)
-        scroll.setMaximumHeight(240)
-        return scroll
+        scroll.setFixedHeight(self.NOTES_HEIGHT - 16)
+        self._notes_fade = _ScrollFade(scroll)
+        QTimer.singleShot(0, self._notes_fade.sync)
+
+        # 内容放进卡片：否则整片文字贴在弹窗底色上，层次太单薄
+        card = XCard(padding=(10, 8, 10, 8), spacing=0)
+        card.addWidget(scroll)
+        return card
 
     def update_tails(self):
+        """下载页：标题 / 版本行 / 说明 / 进度条，整组垂直居中"""
         tails_widget = QWidget()
-        tails_layout = QVBoxLayout(tails_widget)
-        tails_layout.setSpacing(11)
-        tails_layout.setContentsMargins(11, 11, 11, 11)
+        outer = QVBoxLayout(tails_widget)
+        outer.setSpacing(0)
+        outer.setContentsMargins(11, 11, 11, 11)
 
-        # 进度条从0开始
-        self.progress_bar = XProgressBar(height=16, value=0)
-        self.progress_label = XLabel(tr('Restart after download'))
-        tails_layout.addWidget(self.progress_label)
-        tails_layout.addWidget(self.progress_bar)
-        tails_layout.addStretch()
+        group = QVBoxLayout()
+        group.setSpacing(8)
+
+        self.progress_title = XLabel(
+            tr('Downloading update'), style=XLabel.Style.H3, alignment=Qt.AlignCenter)
+        # 带占位符的文案必须先查表再替换，否则显示端拿到的成品字符串查不到模板
+        self.progress_desc = XLabel(
+            XI18N.x_tr('Downloading %1 files. The app will restart automatically when done')
+            .replace('%1', str(len(self.diff or []))),
+            style=XLabel.Style.CAPTION, alignment=Qt.AlignCenter, word_wrap=True)
+        # 百分比单独用标签：进度条自带的文本在高 DPI 下会画到控件外
+        self.progress_percent = XLabel(
+            "0%", style=XLabel.Style.H3, alignment=Qt.AlignCenter)
+        self.progress_bar = XProgressBar(
+            height=self.PROGRESS_HEIGHT, value=0, text_visible=False)
+        self.progress_hint = XLabel(
+            tr('Please do not close the app during the download'),
+            style=XLabel.Style.CAPTION, alignment=Qt.AlignCenter)
+        self.progress_close = XPushButton(
+            tr('Close'), variant=XButtonVariant.OUTLINED, size=XSize.SMALL,
+            color=XColor.TERTIARY)
+        self.progress_close.clicked.connect(self.close)
+        self.progress_close.hide()
+
+        group.addWidget(self.progress_title)
+        group.addSpacing(2)
+        group.addWidget(self.progress_desc)
+        group.addSpacing(10)
+        group.addWidget(self.progress_percent)
+        group.addSpacing(2)
+        group.addWidget(self.progress_bar)
+        group.addWidget(self.progress_hint)
+        group.addWidget(self.progress_close, alignment=Qt.AlignHCenter)
+
+        outer.addStretch()
+        outer.addLayout(group)
+        outer.addStretch()
         self.stack.addWidget(tails_widget)
 
     def _single(self):
@@ -235,8 +320,8 @@ class UpdateWidget(XDialog):
         self.btn_ignore.clicked.connect(self.close)
 
     def execute_update(self):
-        """执行更新"""
-        # 先重置进度条
+        """执行更新（下载期间不允许关闭窗口）"""
+        self._downloading = True
         self.progress_bar.setValue(0)
         # 延迟切换确保UI响应
         QTimer.singleShot(10, self._switch_to_update_view)
@@ -258,19 +343,34 @@ class UpdateWidget(XDialog):
     def update_details(self, value):
         """更新下载进度"""
         self.progress_bar.setValue(value)
+        self.progress_percent.setText("%d%%" % int(value))
 
     def download_complete(self, paras: dict):
         """下载完成"""
+        self._downloading = False
         success = paras.get('success', False)
         save_dir = paras.get('save_dir', '')
         if success:
             self.completed_single.emit(save_dir)
             QTimer.singleShot(100, self.close)
-        else:
-            self.progress_label.setText(tr('Update failed'))
+            return
+        self._show_failed_state()
+
+    def _show_failed_state(self):
+        """失败态：换成可读的说明，并给出关闭入口"""
+        self.progress_title.setText(tr('Update failed'))
+        self.progress_desc.setText(
+            tr('Download failed. Please check the network and try again later.'))
+        self.progress_percent.hide()
+        self.progress_bar.hide()
+        self.progress_hint.hide()
+        self.progress_close.show()
 
     def closeEvent(self, event):
-        """确保窗口关闭时停止下载任务"""
+        """下载过程中不允许关闭，避免留下半截下载"""
+        if self._downloading:
+            event.ignore()
+            return
         task = getattr(self, 'update_task', None)
         if task is not None and task.isRunning():
             task.terminate()

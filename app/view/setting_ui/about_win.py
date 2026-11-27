@@ -7,7 +7,7 @@ SPDX-License-Identifier: LicenseRef-Commons-Clause
 import webbrowser
 import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
-from PySide6.QtCore import Qt, QUrl, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from xsideui import XImage, XLabel, tr, XPushButton, XButtonVariant, XColor, IconName
 from app.utils import BmTools, BM_LOG
@@ -17,10 +17,9 @@ from app.data import ProjectGlobal
 class AboutWidget(QWidget):
     def __init__(self):
         super(AboutWidget, self).__init__()
-        self.version_work = None
         self._init_ui()
         self._init_signal()
-        QTimer.singleShot(100, self.get_version)
+        self.get_version()
 
     def _init_signal(self):
         self.website_btn.clicked.connect(lambda: webbrowser.open(f'{ProjectGlobal.API_GATEWAY}'))
@@ -34,9 +33,18 @@ class AboutWidget(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
 
     def get_version(self):
-        self.version_work = SoftVersionWork()
-        self.version_work.start()
-        self.version_work.version_signal.connect(lambda version: self.version_label.setText(version))
+        """直接读本地发布清单的版本号。
+
+        本地小文件，同步读取即可；之前放 QThread 里 start() 后才 connect，
+        文件读得快时信号先发出、连接还没建立，标签就停在占位的 0.0.1 上。
+        """
+        try:
+            with open(BmTools.get_resources_path() / 'version.json', encoding='utf-8') as f:
+                version = json.load(f).get('version') or ''
+        except (OSError, ValueError) as exc:
+            BM_LOG.error(f"读取本地版本号失败: {exc}")
+            version = ''
+        self.version_label.setText(version or '—')
 
 
 
@@ -47,7 +55,7 @@ class AboutWidget(QWidget):
         layout.addStretch()
         layout.addWidget(soft_ico, alignment=Qt.AlignVCenter | Qt.AlignHCenter)
         layout.addWidget(XLabel(tr('BmScriptsBox'), XLabel.Style.H1), alignment=Qt.AlignCenter)
-        self.version_label = XLabel('0.0.1', XLabel.Style.CAPTION)
+        self.version_label = XLabel('—', XLabel.Style.CAPTION)
         layout.addWidget(self.version_label, alignment=Qt.AlignCenter)
 
         btn_layout = QHBoxLayout()
@@ -76,22 +84,5 @@ class AboutWidget(QWidget):
             alignment=Qt.AlignCenter)
         layout.addStretch()
 
-
-
-class SoftVersionWork(QThread):
-    version_signal = Signal(str)
-    def __init__(self, parent=None):
-        super(SoftVersionWork, self).__init__(parent)
-
-    def run(self):
-        version_path = BmTools.get_resources_path() / 'version.json'
-        if not version_path.exists():
-            BM_LOG.error('version.json does not exist')
-            return
-
-        with open(version_path) as f:
-            version_data = json.load(f)
-            version = version_data.get('version','')
-            self.version_signal.emit(version)
 
 

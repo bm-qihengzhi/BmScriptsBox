@@ -91,7 +91,8 @@ class ContextWidget(QWidget):
                 if key == "state":
                     self._add_switch_cell(row, col, item_data)
                 elif key == "level":
-                    text = level_map.get(item_data.get(key), tr('Unknown'))
+                    level_text = level_map.get(item_data.get(key), tr('Unknown'))
+                    text = XI18N.x_tr(level_text)
                     item = QTableWidgetItem(text)
                     item.setData(Qt.UserRole, item_data.get('level'))
                     self.table_widget.setItem(row, col, item)

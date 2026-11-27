@@ -1,6 +1,6 @@
 ---
 title: 脚本运行机制
-description: 不忙脚本盒子脚本运行机制——TOML 声明脚本、JSON 传参与回传，三段式流水如何把脚本跑起来。
+description: 不忙盒子脚本运行机制——TOML 声明脚本、JSON 传参与回传，三段式流水如何把脚本跑起来。
 status: 稳定
 docType: explanation
 audience: 脚本开发者

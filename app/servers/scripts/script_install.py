@@ -16,6 +16,8 @@ from pathlib import Path
 from PySide6.QtCore import Signal, QObject, QCoreApplication
 
 from app.data import ScriptDatabase
+from xsideui import XI18N, tr
+
 from app.utils import BmError, BmTools, BM_LOG
 from app.utils.badge import LOCAL_BADGE
 from app.cloud.api import UserApi
@@ -117,7 +119,7 @@ class InstallScript(QObject):
             # 8. 完成通知
             if notify:
                 cost = time.time() - start_time
-                self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
+                self._notify_finished(True, XI18N.x_tr("Installed successfully in %1s").replace("%1", f"{cost:.1f}"))
         except Exception as e:
             BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()} | {e!r}")
             self._perform_rollback(installed_resources, script_id if 'script_id' in locals() else None)
@@ -183,7 +185,7 @@ class InstallScript(QObject):
             self._install_script_dependencies(config, installed_resources["new_deps"])
 
             cost = time.time() - start_time
-            self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
+            self._notify_finished(True, XI18N.x_tr("Installed successfully in %1s").replace("%1", f"{cost:.1f}"))
 
         except Exception as e:
             BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()} | {e!r}")
@@ -240,7 +242,7 @@ class InstallScript(QObject):
 
             # 7. 完成通知
             cost = time.time() - start_time
-            self._notify_finished(True, f"安装成功！耗时 {cost:.1f}s")
+            self._notify_finished(True, XI18N.x_tr("Installed successfully in %1s").replace("%1", f"{cost:.1f}"))
 
         except Exception as e:
             BM_LOG.error(f"安装失败，启动回滚程序... 错误详情: {traceback.format_exc()} | {e!r}")
@@ -261,13 +263,13 @@ class InstallScript(QObject):
         if len(self._installing_deps) >= self.MAX_DEPTH:
             raise BmError('install.dependency.too_deep', limit=self.MAX_DEPTH)
         if ScriptDatabase.get_script_by_id(did):
-            self._emit_progress(f"依赖脚本 {did} 已安装，跳过")
+            self._emit_progress(XI18N.x_tr("Dependency %1 already installed, skipped").replace("%1", did))
             return False
         who = config.info.name or str(config.info.id)
-        self._emit_progress(f"{who} 脚本需要依赖 {did}，正在安装 ...")
+        self._emit_progress(XI18N.x_tr("%1 requires dependency %2, installing ...").replace("%1", who).replace("%2", did))
         url, branch = self._resolve_dep_source(did)  # 未发布/解析失败 → raise
         self.install_from_cloud(did, url, branch, notify=False)  # 递归；依赖自身依赖继续展开
-        self._emit_progress(f"依赖脚本 {did} 安装完成")
+        self._emit_progress(XI18N.x_tr("Dependency %1 installed").replace("%1", did))
         return True
 
     def _resolve_dep_source(self, did: str) -> tuple:
@@ -291,10 +293,11 @@ class InstallScript(QObject):
     
     def _download_from_git(self, script_git_url: str, script_dir: Path, branch:str='main') -> bool:
         """从Git仓库下载"""
-        self._emit_progress("开始下载脚本...")
-        success = GitManager().download_script_from_git(script_git_url, str(script_dir), branch)
+        self._emit_progress(tr("Downloading script..."))
+        success = GitManager().download_script_from_git(
+            script_git_url, str(script_dir), branch, progress=self._emit_progress)
         if success:
-            self._emit_progress("脚本下载完成...")
+            self._emit_progress(tr("Script downloaded"))
             BM_LOG.info("Git仓库克隆成功")
         return success
 
@@ -435,7 +438,7 @@ class InstallScript(QObject):
 
     def _perform_rollback(self, resources: dict, script_id: str):
         """执行回滚清理。若为“覆盖既有安装”，保留物理目录并还原旧数据库行，避免毁档。"""
-        self._emit_progress("安装中断，正在清理残留资源...")
+        self._emit_progress(tr("Installation interrupted, cleaning up leftovers..."))
 
         try:
             # 1. 清理右键菜单（覆盖安装时旧菜单也可能被改动，一并清理后还原）
@@ -475,7 +478,7 @@ class InstallScript(QObject):
             for did in resources.get("new_deps") or []:
                 self._rollback_dependency(did)
 
-            self._emit_progress("残留资源清理完毕")
+            self._emit_progress(tr("Leftover resources cleaned up"))
 
         except Exception as rollback_err:
             BM_LOG.critical(f"回滚过程中发生二次错误: {rollback_err}")
@@ -535,7 +538,7 @@ class InstallScript(QObject):
                     and not (script_dir / 'bm-scripts-box-rc.toml').exists() \
                     and not (script_dir / self.INSTALL_MARKER).exists():
                 BM_LOG.info(f"检测到残余目录，清理后重新安装: {script_dir}")
-                self._emit_progress("检测到上此残留数据，正在清理...")
+                self._emit_progress(tr("Leftover data detected, cleaning up..."))
                 BmTools.remove_dir(script_dir)
                 # 后台可能还在删（如卸载线程），等几秒重试
                 if script_dir.exists():
@@ -546,7 +549,7 @@ class InstallScript(QObject):
                             break
                 script_dir.mkdir(parents=True, exist_ok=True)
 
-            self._emit_progress("初始化脚本目录完成")
+            self._emit_progress(tr("Script directory initialized"))
             return script_dir
         except Exception as e:
             raise BmError('install.fs.init_failed', path=script_id) from e
@@ -582,7 +585,7 @@ class InstallScript(QObject):
             # 寻找配置文件（与 TomlManager 使用同一套定位规则）
             toml_file = TomlManager().find_toml_file(target_dir)
 
-            self._emit_progress("解压包文件完成")
+            self._emit_progress(tr("Archive extracted"))
             return toml_file.parent
         except Exception as e:
             raise BmError('install.extract.failed') from e
@@ -634,34 +637,34 @@ class InstallScript(QObject):
 
         if lang == "html":
             # 安装webview-cli
-            self._emit_progress("同步webview...")
+            self._emit_progress(tr("Syncing webview..."))
             p = PackagesManager()
             p.packages_progress.connect(self.progress_signal.emit)
             p.install_cli('webview-cli')
 
         if lang == "bat":
             # 转换CRLF
-            self._emit_progress("统一换行符为 CRLF 格式...")
+            self._emit_progress(tr("Normalizing line endings to CRLF..."))
             self._convert_bat_to_crlf(script_dir)
 
         if lang == "powershell":
             # 安装powershell v7
-            self._emit_progress("同步pwsh...")
+            self._emit_progress(tr("Syncing pwsh..."))
             p = PackagesManager()
             p.packages_progress.connect(self.progress_signal.emit)
             p.install_cli('pwsh')
 
         # 处理二进制资源下载（官方清单模式 + 作者直连模式）
         if config.runtime.binaries:
-            self._emit_progress("同步外部二进制资源...")
+            self._emit_progress(tr("Syncing external binaries..."))
             pm = PackagesManager(consent_callback=self._consent_callback)
             pm.packages_progress.connect(self.progress_signal.emit)
             pm.batch_install_cli(config.runtime.binaries, script_id)
 
         # 处理 AI 模型下载（失败则终止安装）
         if config.models:
-            self._emit_progress("同步 AI 模型资源...")
-            self._emit_progress("模型下载预计需要 60 秒...")
+            self._emit_progress(tr("Syncing AI model resources..."))
+            self._emit_progress(tr("Model download may take about 60 seconds..."))
             from app.servers.models import ModelManager
             mm = ModelManager()
             mm.model_progress.connect(lambda d: self.progress_signal.emit(d))
@@ -674,7 +677,7 @@ class InstallScript(QObject):
             if resources is not None:
                 resources[key] = True
 
-        self._emit_progress("正在注册系统组件...")
+        self._emit_progress(tr("Registering system components..."))
 
         # 1. 入库
         ScriptDatabase().from_config_model(config, badge)
@@ -711,14 +714,14 @@ class InstallScript(QObject):
         if isinstance(error, BmError):
             return str(error)
         err_str = str(error).strip()
-        if "ProxyError" in err_str: return "网络代理异常..."
-        if "timeout" in err_str.lower(): return "请求超时..."
+        if "ProxyError" in err_str: return tr("Network proxy error, check the system proxy settings")
+        if "timeout" in err_str.lower(): return tr("Request timed out, please try again later")
 
         first_line = err_str.split('\n')[0]
         if len(first_line) > 120:
             first_line = first_line[:117] + "..."
 
-        return f"安装由于意外中断: {first_line}"
+        return XI18N.x_tr("Installation interrupted unexpectedly: %1").replace("%1", first_line)
 
     @staticmethod
     def _python_specs_compatible(a: str, b: str) -> bool:

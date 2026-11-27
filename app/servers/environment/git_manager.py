@@ -21,7 +21,8 @@ class GitManager:
     # 更新脚本时需保留的环境目录 / 记录文件（在同步时一律不删除）
     PRESERVE = {'.venv', 'node_modules', '.git', '.bm-sync-manifest.json', '.bm-source.json'}
 
-    def download_script_from_git(self, git_url: str, script_dir: str, branch: str = 'main') -> bool:
+    def download_script_from_git(self, git_url: str, script_dir: str, branch: str = 'main',
+                                 progress=None) -> bool:
         dir_path = Path(script_dir).resolve()
 
         # 失败时不再删除既有安装目录（更新场景下那是旧版本），交由上层回滚决定
@@ -29,14 +30,15 @@ class GitManager:
             if 'github.com' not in git_url:
                 BM_LOG.error(f"仅支持 GitHub 仓库归档下载，不支持该地址: {git_url}")
                 return False
-            return self._download_archive(git_url, dir_path, branch)
+            return self._download_archive(git_url, dir_path, branch, progress)
         except Exception as e:
             BM_LOG.error(f"下载脚本失败: {e}")
             return False
 
     # --- GitHub 归档 zip 下载 ---
 
-    def _download_archive(self, git_url: str, dir_path: Path, branch: str) -> bool:
+    def _download_archive(self, git_url: str, dir_path: Path, branch: str,
+                          progress=None) -> bool:
         owner_repo = self._parse_github_url(git_url)
         if not owner_repo:
             raise ValueError(f"无法解析 GitHub 仓库地址: {git_url}")
@@ -53,6 +55,10 @@ class GitManager:
 
             BM_LOG.info(f"下载 GitHub 归档: {codeload_url[:90]}...")
             xd = XDownLoad()
+            if progress is not None:
+                # 把 mudl 的源数 / 百分比 / 速度透给安装日志，避免长时间只有一行"下载脚本..."
+                xd.download_progress.connect(
+                    lambda payload: progress(payload.get('msg') or ''))
             zip_path = xd.download(codeload_url, str(tmp_zip_dir), output_filename=zip_name)
 
             ArchiveExtractor().extract(zip_path, str(tmp_extract_dir))
